@@ -32,3 +32,12 @@ CREATE EXTERNAL TABLE [dbo].[Ext_Actionam_actionreasonspvo]
 WITH (DATA_SOURCE = [AzureDataLakeStorage],LOCATION = N'/SDM/BICC/Actionam_actionreasonspvo/',
 FILE_FORMAT = [TextFileFormat2],REJECT_TYPE = VALUE,REJECT_VALUE = 100)
 GO
+
+
+
+/****** Object:  ExternalDataSource [AzureDataLakeStorage]    Script Date: 06-01-2020 13:43:59 ******/
+CREATE EXTERNAL DATA SOURCE [AzureDataLakeStorage] WITH 
+(TYPE = HADOOP, LOCATION = N'abfss://edw@pikeedwdevdls.dfs.core.windows.net/', CREDENTIAL = [ADLSCredential])
+GO
+
+
