@@ -1,0 +1,42 @@
+/****** Object:  View [dbo].[vw_Revenue1]    Script Date: 05-22-2020 17:41:07 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE VIEW [dbo].[vw_Revenue1]
+AS select 
+	'' as EXPENDITURE_TYPE_NAME,
+	Rev.[REVENUEDISTRIBUTIONPEOLEDGERCURRREVENUEAMT] Total_Cost, 
+	'' as CLASS_CODE,
+	'' as CLASS_CATEGORY  ,
+	TASK.[PROJECTBASEPEOPROJECTID] as project_id,
+	TASK.[PROJELEMENTID] as Task_Id,
+	TASK.[TASKSTRUCTUREBASEPEOELEMENTNUMBER] as Task_Number ,
+	TASK.[TASKSTRUCTURETRANSLATIONPEONAME] as WorkOrder,
+	TASK.[TASKSTRUCTUREBASEPEOCHARGEABLEFLAG] as chargeable_flag,
+	TASK.[TASKSTRUCTUREBASEPEOBILLABLEFLAG] as billable_flag,
+	TASK.[TASKSTRUCTUREBASEPEOPLANNINGENDDATE] as planned_finish_date,
+	Projects.[PROJECTBASEPEOSEGMENT1] Project_Number,
+	--'' as Project_Name,
+	PRojects.[PROJECTCODESPEOTEXTATTR10] as Contract_Type ,
+	'' as expenditure_category_id,
+	'' as expenditure_category_name	 ,
+	'' as expenditure_type_id,
+	'' Week_End_Date,
+	fiscalday.[FISCALYEARNUMBER] + '-'  +  left(fiscalday.[FISCALPERIODNAME],3) as Accounting_Period_Name,
+	fiscalday.reportdate as Accounting_Date,
+	0 Production_Hours,
+	'Revenue' as QueryType
+		 from [dbo].[EXT_fscmtopmodelam_revenuedistributionam_revenuedistributionpvo] Rev,
+			(select distinct [PROJELEMENTID],[TASKSTRUCTURETRANSLATIONPEONAME], [PROJECTBASEPEOPROJECTID],[TASKSTRUCTUREBASEPEOELEMENTNUMBER],[TASKSTRUCTUREBASEPEOCHARGEABLEFLAG], [TASKSTRUCTUREBASEPEOBILLABLEFLAG],[TASKSTRUCTUREBASEPEOPLANNINGENDDATE]  from [dbo].[temp_EXT_fscmtopmodelam_pjfprojectdefinitionam_taskpvo] )Task ,
+			(select distinct  [PROJECTBASEPEOSEGMENT1],[PROJECTCODESPEOTEXTATTR10], [PROJECTCODESPEOTEXTATTR12], [PROJECTID],[PROJECTCODESPEOTEXTATTR03], [PROJECTCODESPEOTEXTATTR11] from [dbo].[temp_EXT_fscmtopmodelam_pjfprojectam_project] ) Projects ,
+			(select distinct [FISCALYEARNUMBER],[FISCALPERIODNAME], reportdate, FISCALPERIODSETNAME, FISCALPERIODTYPE,[FISCALPERIODADJUSTMENTPERIODFLAG] from [dbo].[temp_EXT_fscmtopmodelam_finglcalaccam_fiscaldaypvo]  where FISCALPERIODSETNAME='Pike Corp' ) fiscalday
+			where rev.[REVENUEDISTRIBUTIONPEOTRANSACTIONTASKID]=task.[PROJELEMENTID] 
+			and [REVENUEDISTRIBUTIONPEOTRANSACTIONPROJECTID]=projects.[PROJECTID]
+			and [REVENUEDISTRIBUTIONPEOGLDATE]=fiscalday.reportdate
+			AND fiscalday.[FISCALPERIODADJUSTMENTPERIODFLAG]='N';
+GO
+
+

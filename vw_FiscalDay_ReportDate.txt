@@ -1,0 +1,13 @@
+/****** Object:  View [dbo].[vw_FiscalDay_ReportDate]    Script Date: 05-22-2020 18:12:28 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE VIEW [dbo].[vw_FiscalDay_ReportDate] AS select distinct [REPORTDATE] as ReportDate
+from 
+(select distinct [PARENTWEEK], [REPORTDATE] from [dbo].[EXT_hcmtopmodelanalyticsglobalam_gregoriancalendaram_fndcalday]) t;
+GO
+
+

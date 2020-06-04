@@ -1,0 +1,238 @@
+/****** Object:  View [dbo].[vw_raghu_inv_summary]    Script Date: 05-19-2020 16:29:09 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE VIEW [dbo].[vw_raghu_inv_summary]
+AS select
+--CLASS_Category,
+--Class_code,
+--[CUSTOMER],
+--[PROJECT_NAME],
+--[PROJECT_NUMBER_DFF],
+--[CONTRACT_TYPE],
+--[BBTT],
+--[WORK_ORDER],
+--[TASK_NUMBER],
+--[CREW_LEADER],
+--[CHARGEABLE_TASK],
+--[BILLABLE_TASK],
+--[PLANNED_FINISH_DATE],
+--[ACCOUNTING_PERIOD_NAME],
+--[WEEK_END_DATE],
+--[ACCOUNTING_DATE],
+--[BILLABLE_GROSS_MARGIN_PERCENT], (Invoice Dist PVO)
+--[BILLABLE_GROSS_MARGIN],(Invoice Dist PVO)
+--[REVENUE],(revenue Dist) 
+--[BILLED_AMOUNT],(Invoice) 
+--[TOTAL_COST],
+
+classcat.CLASSCATEGORY,
+Classcode.CLASSCODE,
+proj.Customer,
+projTrans.ProjName PROJECT_NAME,
+proj.Project_Number_dff,
+Proj.CONTRACT_TYPE,
+proj.BBTT,
+task.Task_Name as WORK_ORDER,
+task.Task_Number TASK_NUMBER,
+--pers.PERSONNAMEPEOLISTNAME as Crew_leader,
+task.PERSONNAMEPEOLISTNAME as Crew_leader,
+task.TASKSTRUCTUREBASEPEOCHARGEABLEFLAG as  CHARGEABLE_TASK,
+task.TASKSTRUCTUREBASEPEOBILLABLEFLAG as BILLABLE_TASK,
+task.TASKSTRUCTUREBASEPEOPLANNINGENDDATE as PLANNED_FINISH_DATE,
+fisday.[FISCALYEARNUMBER] + '-'+left(fisday.[FISCALPERIODNAME],3) as ACCOUNTING_PERIOD_NAME,
+WEK.CALWEEKENDDATE as WEEK_END_DATE,
+fisday.reportdate as ACCOUNTING_DATE,
+sum(convert(Numeric(25,6),ledger_curr_billed_amt)) as Billed_Amount
+/*sum(convert(numeric(25,2),pcd.[PROJECTCOSTDISTRIBUTIONPEOPROJFUNCBURDENEDCOST])) as Total_Cost,
+sum(convert(numeric(25,6),(case when expCat.EXPENDITURECATEGORYNAME='labor'  then PROJECTCOSTDISTRIBUTIONPEOPROJFUNCBURDENEDCOST end ))) as labor_Cost,
+sum(convert(numeric(25,6),(case when expCat.EXPENDITURECATEGORYNAME='Equipment'  then PROJECTCOSTDISTRIBUTIONPEOPROJFUNCBURDENEDCOST end ))) as Equipment_Cost,
+sum(convert(numeric(25,6),(case when expCat.EXPENDITURECATEGORYNAME='Materials'  then PROJECTCOSTDISTRIBUTIONPEOPROJFUNCBURDENEDCOST end ))) as Materials_Cost,
+sum(convert(numeric(25,6),(case when expCat.EXPENDITURECATEGORYNAME='Subcontract'  then PROJECTCOSTDISTRIBUTIONPEOPROJFUNCBURDENEDCOST end ))) as Subcontract_Cost,
+sum(convert(numeric(25,6),(case when expCat.EXPENDITURECATEGORYNAME in ( 'Expense','Overhead','Tools','Travel')  then PROJECTCOSTDISTRIBUTIONPEOPROJFUNCBURDENEDCOST end ))) as OverHead_Cost,
+sum(convert(numeric(25,6), (case when exptype.EXPENDITURETYPEEXPENDITURETYPENAME  IN ('Billable Contract Labor - Doubletime','Billable Contract Labor - Overtime',
+'Billable Contract Labor - Regular','Productive Labor - Doubletime','Productive Labor - Overtime','Productive Labor - Regular')
+then ( case when (pcd.[PROJECTCOSTDISTRIBUTIONPEOQUANTITY] not like '%E%') then  pcd.[PROJECTCOSTDISTRIBUTIONPEOQUANTITY] end ) 
+end ) ) )  as PROD_LABOR_HOURS
+*/
+from
+/*
+(select  distinct [EXPENDITUREITEMID],[EXPENDITUREITEMPEOPARENTLINENUMBER], LINENUM,
+[PROJECTCOSTDISTRIBUTIONPEOPROJECTID], [PROJECTCOSTDISTRIBUTIONPEOTASKID], [PROJECTCOSTDISTRIBUTIONPEOPRVDRGLDATE],
+[PROJECTCOSTDISTRIBUTIONPEOORGID],
+[PROJECTCOSTDISTRIBUTIONPEOQUANTITY],[PROJECTCOSTDISTRIBUTIONPEOPROJFUNCBURDENEDCOST]  
+from [dbo].[EXT_Fscmtopmodelam_pjctransactionsam_projectcostdistributionpvo]) pcd,                                                                                        
+*/
+
+	(SELECT distinct
+                        INVOICEDISTID invoice_dist_id ,
+						INVOICEDISTRIBUTIONPEOORGID,
+                        Convert(Numeric(25,2),[INVOICEDISTRIBUTIONPEOLEDGERCURRBILLEDAMT] ) ledger_curr_billed_amt,
+                        [INVOICEDISTRIBUTIONPEOTRANSACTIONPROJECTID] transaction_project_id,
+                        [INVOICEDISTRIBUTIONPEOTRANSACTIONTASKID] transaction_task_id,
+                        [INVOICEHEADERPEOGLDATE]  gl_date
+						--,
+                        --[INVOICEHEADERPEOINVOICEDATE] AS invoice_date1,
+                        --( coalesce([INVOICEHEADERPEOGLDATE],INVOICEHEADERPEOINVOICEDATE) ) AS gl_invoice_date
+                    FROM
+	                  EXT_fscmtopmodelam_invoicedistributionam_invoicedistributionpvo ) inv,
+
+( SELECT Project_Number_dff as PROJECT_NUMBER, [PROJECTBASEPEOSEGMENT1],[PROJECTCODESPEOTEXTATTR10] ,[PROJECTCODESPEOTEXTATTR12]
+,[PROJECTID],[PROJECTCODESPEOTEXTATTR03],[PROJECTCODESPEOTEXTATTR11],Contract_Type,Project_Number_dff ,Customer_Class,Area_Manager
+      ,Area_Supervisor,Billing_Clerk,Billing_Coordinator,Contract_Administrator,Customer,Director ,Operations_VP,Regional_VP ,WCNB_Manager
+,BBTT,Location_Code,Per_Diem_Lodging,Per_Diem_Meals ,State,City
+           FROM
+(
+SELECT
+DISTINCT [PROJECTBASEPEOSEGMENT1] ,[PROJECTCODESPEOTEXTATTR10], [PROJECTCODESPEOTEXTATTR12],
+[PROJECTID],[PROJECTCODESPEOTEXTATTR03], [PROJECTCODESPEOTEXTATTR11]
+FROM [dbo].[EXT_fscmtopmodelam_pjfprojectam_project]
+) p,
+(
+SELECT DISTINCT s_k_5000,[CONTRACT_TYPE_] as Contract_Type ,Project_Number_ as Project_Number_dff
+,[CUSTOMER_CLASS_] as Customer_Class,[DESC_AREA_MANAGER_]  as Area_Manager,[DESC_AREA_SUPERVISOR_] as Area_Supervisor
+      ,[DESC_BILLING_CLERK_] as Billing_Clerk ,[DESC_BILLING_COORDINATOR_] as Billing_Coordinator
+      ,[DESC_CNTRCT_TNSTRTR_] as Contract_Administrator,[DESC_CUSTOMER_] as Customer
+      ,[DESC_DIRECTOR_] as Director,[DESC_OPERATIONS_VP_] as Operations_VP
+      ,[DESC_REGIONAL_VP_] as Regional_VP ,[DESC_WCNB_MANAGER_] as WCNB_Manager
+,[DESC_BBTT_] as BBTT,[DESC_LOCATION_CODE_] as Location_Code,[PER_DIEM_LODGING_] as Per_Diem_Lodging
+,[PER_DIEM_MEALS_] as Per_Diem_Meals,[STATE_] as State,[CITY_] as City
+FROM [EXT_fscmtopmodelam_pjf_projects_allbiam_flex_bi_pjf_projects_all_vi]
+) p1 WHERE p.[PROJECTID]=p1.s_k_5000 ) proj,
+(SELECT [DESCRIPTION]
+      ,[NAME] as ProjName
+      ,[PROJECTID]
+  FROM [dbo].[EXT_fscmtopmodelam_pjfprojectam_projecttranslation]) projTrans,                                                                                 
+(select distinct [FISCALYEARNUMBER],[FISCALPERIODNAME], reportdate, FISCALPERIODSETNAME, FISCALPERIODTYPE,[FISCALPERIODADJUSTMENTPERIODFLAG]                                                                                      
+from [dbo].[EXT_fscmtopmodelam_finglcalaccam_fiscaldaypvo]
+--where FISCALPERIODSETNAME='Pike Corp'
+) fisday,                                                                                    
+(Select distinct [LEDGERPERIODSETNAME],[LEDGERACCOUNTEDPERIODTYPE],[LEDGERID] from  [dbo].[EXT_fscmtopmodelam_finglledgerdefnam_ledgerpvo] ) ledger,                                                                                      
+/*(Select distinct [EXPENDITUREITEMID],[EXPENDITUREITEMPEOEXPENDITURETYPEID]
+from [dbo].[EXT_fscmtopmodelam_pjctransactionsam_expenditureitempvo]) expitem,                                                                                    
+(Select distinct  [EXPENDITURETYPEEXPENDITURECATEGORYID],[EXPENDITURETYPEID],[EXPENDITURETYPEEXPENDITURETYPENAME]
+from [dbo].[EXT_fscmtopmodelam_pjfsetuptransactionsam_expendituretypeview] ) exptype,
+*/                                                                                    
+(select distinct [PJFPROJECTCLASSESPROJECTID], [PJFPROJECTCLASSESCLASSCATEGORYID],[PJFPROJECTCLASSESCLASSCODEID]
+from [dbo].[EXT_fscmtopmodelam_pjfsetupprojectsam_projectclass] )projclass,                                                                                        
+(SELECT distinct [CLASSCODE]
+      ,[CLASSCODEID]
+      ,[DESCRIPTION]
+       ,[SOURCELANG]
+  FROM [dbo].[EXT_fscmtopmodelam_pjfsetupprojectsam_classcodetranslation]) ClassCode,                                                                             
+(Select distinct [CLASSCATEGORYID],[CLASSCATEGORY] from [dbo].[EXT_fscmtopmodelam_pjfsetupprojectsam_classcategorytranslation] ) classcat, 
+/*
+( select distinct TaskStructureTranslationPEOName As Task_Name,
+TaskStructureBasePEOElementNumber as Task_Number, [PROJELEMENTID], [PROJECTBASEPEOPROJECTID], TASKSTRUCTUREBASEPEOMANAGERPERSONID
+, TASKSTRUCTUREBASEPEOCHARGEABLEFLAG, TASKSTRUCTUREBASEPEOBILLABLEFLAG, TASKSTRUCTUREBASEPEOPLANNINGENDDATE
+ from [dbo].[EXT_fscmtopmodelam_pjfprojectdefinitionam_taskpvo]) task,
+-- (
+--SELECT distinct
+--PERSONNAMEPEOLISTNAME,PERSONNAMEPEOPERSONID
+--from [dbo].[EXT_hcmtopmodelanalyticsglobalam_personam_personnamepvo]
+--) Pers,
+*/
+(select task1.Task_Name as Task_Name, task1.Task_Number as Task_Number,task1.[PROJELEMENTID] as [PROJELEMENTID], 
+task1.[PROJECTBASEPEOPROJECTID] as [PROJECTBASEPEOPROJECTID], task1.TASKSTRUCTUREBASEPEOMANAGERPERSONID as TASKSTRUCTUREBASEPEOMANAGERPERSONID,
+task1.TASKSTRUCTUREBASEPEOCHARGEABLEFLAG as TASKSTRUCTUREBASEPEOCHARGEABLEFLAG , task1.TASKSTRUCTUREBASEPEOBILLABLEFLAG as TASKSTRUCTUREBASEPEOBILLABLEFLAG,
+task1.TASKSTRUCTUREBASEPEOPLANNINGENDDATE as TASKSTRUCTUREBASEPEOPLANNINGENDDATE,
+pers.PERSONNAMEPEOLISTNAME as PERSONNAMEPEOLISTNAME from
+( select distinct TaskStructureTranslationPEOName As Task_Name,
+TaskStructureBasePEOElementNumber as Task_Number, [PROJELEMENTID], [PROJECTBASEPEOPROJECTID], TASKSTRUCTUREBASEPEOMANAGERPERSONID
+, TASKSTRUCTUREBASEPEOCHARGEABLEFLAG, TASKSTRUCTUREBASEPEOBILLABLEFLAG, TASKSTRUCTUREBASEPEOPLANNINGENDDATE
+ from [dbo].[EXT_fscmtopmodelam_pjfprojectdefinitionam_taskpvo]) task1 
+Left Outer Join 
+ (
+SELECT distinct
+PERSONNAMEPEOLISTNAME,PERSONNAMEPEOPERSONID
+from [dbo].[EXT_hcmtopmodelanalyticsglobalam_personam_personnamepvo]
+) Pers
+on task1.TASKSTRUCTUREBASEPEOMANAGERPERSONID=Pers.PERSONNAMEPEOPERSONID) task,
+
+/*(select distinct [PROJELEMENTID], [PROJECTBASEPEOPROJECTID] from [dbo].[EXT_fscmtopmodelam_pjfprojectdefinitionam_taskpvo]) task, */
+
+(select distinct [CALWEEK],[CALWEEKENDDATE]  from [dbo].[EXT_hcmtopmodelanalyticsglobalam_gregoriancalendaram_fndcalweek]) WEK,
+(select distinct [PARENTWEEK], [REPORTDATE] from [dbo].[EXT_hcmtopmodelanalyticsglobalam_gregoriancalendaram_fndcalday]) fndcaldayeo,
+(select distinct [ORGANIZATIONINFORMATIONPEOORGINFORMATION3],ORGANIZATIONINFORMATIONPEOORGANIZATIONID,
+[ORGANIZATIONINFORMATIONPEOORGINFORMATIONCONTEXT],
+[EFFECTIVESTARTDATE], [EFFECTIVEENDDATE]  
+from [dbo].[EXT_hcmtopmodelanalyticsglobalam_organizationam_organizationinformationpvo]
+) expenditurebupeo
+/*,
+(SELECT Distinct [DESCRIPTION],[EXPENDITURECATEGORYID],[EXPENDITURECATEGORYNAME],[LANGUAGE],[SOURCELANG]
+FROM [dbo].[EXT_fscmtopmodelam_pjfsetuptransactionsam_expenditurecategorytranslation]) expCat
+*/
+
+where
+			1=1
+			--and pcd.Projectcostdistributionpeoprojectid=proj.[PROJECTID]                                                                                        
+			and inv.transaction_project_id=proj.[PROJECTID]
+
+			and proj.[PROJECT_NUMBER] in ('01259-000')
+			and fisday.[FISCALYEARNUMBER] in ('2017','2018')                                                                                      
+			and left(fisday.[FISCALPERIODNAME],3) in ('Aug','Sep')                                                                                                                                                                              
+--			and pcd.projectcostdistributionpeoprvdrgldate=fisday.reportdate 
+			and inv.gl_date=fisday.reportdate 
+			
+			and fisday.FISCALPERIODSETNAME = ledger.[LEDGERPERIODSETNAME]                                                                                  
+			AND fisday.FISCALPERIODTYPE = ledger.[LEDGERACCOUNTEDPERIODTYPE]                                                                                      
+			and fisday.[FISCALPERIODADJUSTMENTPERIODFLAG]='N'                                                                                        
+/*			and exptype.expendituretypeid=expitem.expenditureitempeoexpendituretypeid
+			and expCat.EXPENDITURECATEGORYID=exptype.EXPENDITURETYPEEXPENDITURECATEGORYID
+			and expitem.expenditureitemid=pcd.expenditureitemid                                                                                      
+*/
+			and projclass.[PJFPROJECTCLASSESPROJECTID]=proj.[PROJECTID]                                                                                    
+			and projclass.[PJFPROJECTCLASSESCLASSCATEGORYID]=classcat.[CLASSCATEGORYID]
+
+			and projclass.PJFPROJECTCLASSESCLASSCODEID= ClassCode.CLASSCODEID
+
+			and proj.projectid=projTrans.projectid
+
+			--and pers.PERSONNAMEPEOPERSONID=task.TASKSTRUCTUREBASEPEOMANAGERPERSONID
+			
+			and inv.transaction_task_id=task.[PROJELEMENTID]
+			
+																							
+			and classcat.[CLASSCATEGORY]='Line of Business'                                                                                  
+			--and task.[PROJELEMENTID]=pcd.[projectcostdistributionpeotaskid]                                                                                        
+
+			--and task.[PROJECTBASEPEOPROJECTID]=pcd.Projectcostdistributionpeoprojectid                                                                                    
+			and task.[PROJECTBASEPEOPROJECTID]=inv.transaction_project_id                                                                                    
+
+			and task.[PROJECTBASEPEOPROJECTID]=proj.[PROJECTID]                                                                                      
+
+			and fndcaldayeo.[PARENTWEEK]=wek.[CALWEEK]
+			--AND pcd.projectcostdistributionpeoprvdrgldate = fndcaldayeo.[REPORTDATE]    
+
+			AND inv.gl_date = fndcaldayeo.[REPORTDATE]    
+
+			AND expenditurebupeo.[ORGANIZATIONINFORMATIONPEOORGINFORMATION3] = ledger.[LEDGERID]
+			--AND pcd.[PROJECTCOSTDISTRIBUTIONPEOORGID] = expenditurebupeo.ORGANIZATIONINFORMATIONPEOORGANIZATIONID
+			AND inv.[INVOICEDISTRIBUTIONPEOORGID] = expenditurebupeo.ORGANIZATIONINFORMATIONPEOORGANIZATIONID
+
+			AND ( 'FUN_BUSINESS_UNIT' ) = expenditurebupeo.[ORGANIZATIONINFORMATIONPEOORGINFORMATIONCONTEXT]
+			AND ('2018-03-26' BETWEEN expenditurebupeo.[EFFECTIVESTARTDATE] AND expenditurebupeo.[EFFECTIVEENDDATE])
+group by
+			classcat.CLASSCATEGORY,
+			Classcode.CLASSCODE,
+			proj.Customer,
+			projTrans.ProjName ,
+			proj.Project_Number_dff,
+			Proj.CONTRACT_TYPE,
+			proj.BBTT,
+			task.Task_Name,
+			task.Task_Number ,
+			--pers.PERSONNAMEPEOLISTNAME ,
+			task.PERSONNAMEPEOLISTNAME ,
+			task.TASKSTRUCTUREBASEPEOCHARGEABLEFLAG ,
+			task.TASKSTRUCTUREBASEPEOBILLABLEFLAG ,
+			task.TASKSTRUCTUREBASEPEOPLANNINGENDDATE ,
+			fisday.[FISCALYEARNUMBER] + '-'+left(fisday.[FISCALPERIODNAME],3) ,
+			WEK.CALWEEKENDDATE ,
+			fisday.reportdate;
+GO
+
+

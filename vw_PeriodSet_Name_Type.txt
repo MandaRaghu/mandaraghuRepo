@@ -1,0 +1,12 @@
+/****** Object:  View [dbo].[vw_PeriodSet_Name_Type]    Script Date: 05-22-2020 17:47:28 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE VIEW [dbo].[vw_PeriodSet_Name_Type] AS select distinct LEDGERACCOUNTEDPERIODTYPE+'-'+ LEDGERPERIODSETNAME as cc_PeriodSet_Name_Type
+from EXT_fscmtopmodelam_finglledgerdefnam_ledgerpvo;
+GO
+
+

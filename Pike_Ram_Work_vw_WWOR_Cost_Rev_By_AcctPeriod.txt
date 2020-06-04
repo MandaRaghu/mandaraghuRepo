@@ -1,0 +1,24 @@
+/****** Object:  View [dbo].[vw_WWOR_Cost_Rev_By_AcctPeriod]    Script Date: 05-22-2020 18:13:24 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE VIEW [dbo].[vw_WWOR_Cost_Rev_By_AcctPeriod]
+AS select (Project_Number+'-'+Accounting_Period_Name) as KeyId, Project_Number, Customer, Accounting_Period_Name, SUM( [Total Cost]) as [Total Cost] , SUM(Revenue) AS Revenue, SUM([Production Hours]) as [Production Hours]
+from (
+	select Project_Number, Customer, Accounting_Period_Name, SUM(total_cost) [Total Cost], 0 as Revenue, SUM(Production_Hours) [Production Hours]
+	from Vw_Cost
+	group by Project_Number, Customer, Accounting_Period_Name
+
+	Union
+
+	select Project_Number, Customer, Accounting_Period_Name, 0 [Total Cost], SUM(Revenue) as Revenue, 0 [Production Hours]
+	from [vw_Revenue]
+	group by Project_Number, Customer, Accounting_Period_Name
+)a
+group by Project_Number, Customer, Accounting_Period_Name;
+GO
+
+

@@ -1,0 +1,60 @@
+/****** Object:  View [dbo].[vw_Revenue]    Script Date: 05-22-2020 17:40:10 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE VIEW [dbo].[vw_Revenue] AS select 
+	ISNULL(exptype.expendituretypeexpendituretypename,'') as EXPENDITURE_TYPE_NAME,
+	sum(Rev.[REVENUEDISTRIBUTIONPEOLEDGERCURRREVENUEAMT]) Revenue, 
+	'' as CLASS_CODE,
+	'' as CLASS_CATEGORY  ,
+	TASK.[PROJECTBASEPEOPROJECTID] as project_id,
+	TASK.[PROJELEMENTID] as Task_Id,
+	TASK.[TASKSTRUCTUREBASEPEOELEMENTNUMBER] as Task_Number ,
+	TASK.[TASKSTRUCTURETRANSLATIONPEONAME] as WorkOrder,
+	TASK.[TASKSTRUCTUREBASEPEOCHARGEABLEFLAG] as chargeable_flag,
+	TASK.[TASKSTRUCTUREBASEPEOBILLABLEFLAG] as billable_flag,
+	TASK.[TASKSTRUCTUREBASEPEOPLANNINGENDDATE] as planned_finish_date,
+	projdff.[PROJECT_NUMBER_] Project_Number,
+	PRojects.[PROJECTCODESPEOTEXTATTR10] as Contract_Type ,
+	ExpCategory.[EXPENDITURECATEGORYID] expenditure_category_id ,
+	ISNULL(ExpCategory.[EXPENDITURECATEGORYNAME],'') expenditure_category_name,
+	ExpType.[EXPENDITURETYPEID] expenditure_type_id,
+	'' Week_End_Date,
+	fiscalday.[FISCALYEARNUMBER] + '-'  +  left(fiscalday.[FISCALPERIODNAME],3) as Accounting_Period_Name,
+	fiscalday.reportdate as Accounting_Date,
+	0 Production_Hours,
+	[DESC_CUSTOMER_] Customer,
+	'Revenue' as QueryType
+		 from [dbo].[EXT_fscmtopmodelam_revenuedistributionam_revenuedistributionpvo] Rev
+			inner join (select distinct [PROJELEMENTID],[TASKSTRUCTURETRANSLATIONPEONAME], [PROJECTBASEPEOPROJECTID],[TASKSTRUCTUREBASEPEOELEMENTNUMBER],[TASKSTRUCTUREBASEPEOCHARGEABLEFLAG], [TASKSTRUCTUREBASEPEOBILLABLEFLAG],[TASKSTRUCTUREBASEPEOPLANNINGENDDATE]  from [dbo].[temp_EXT_fscmtopmodelam_pjfprojectdefinitionam_taskpvo] )Task on rev.[REVENUEDISTRIBUTIONPEOTRANSACTIONTASKID]=task.[PROJELEMENTID] 
+			inner join (select distinct  [PROJECTBASEPEOSEGMENT1],[PROJECTCODESPEOTEXTATTR10], [PROJECTCODESPEOTEXTATTR12], [PROJECTID],[PROJECTCODESPEOTEXTATTR03], [PROJECTCODESPEOTEXTATTR11] from [dbo].[temp_EXT_fscmtopmodelam_pjfprojectam_project] ) Projects on [REVENUEDISTRIBUTIONPEOTRANSACTIONPROJECTID]=projects.[PROJECTID]
+			inner join (select distinct  [S_K_5000],[PROJECT_NUMBER_],[DESC_CUSTOMER_] from [dbo].[temp_EXT_fscmtopmodelam_pjf_projects_allbiam_flex_bi_pjf_projects_all_vi]) projdff   on  Projects.Projectid = projdff.S_K_5000
+			inner join (select distinct [FISCALYEARNUMBER],[FISCALPERIODNAME], reportdate, FISCALPERIODSETNAME, FISCALPERIODTYPE,[FISCALPERIODADJUSTMENTPERIODFLAG] from [dbo].[temp_EXT_fscmtopmodelam_finglcalaccam_fiscaldaypvo]  where FISCALPERIODSETNAME='Pike Corp' ) fiscalday on [REVENUEDISTRIBUTIONPEOGLDATE]=fiscalday.reportdate
+			left outer join (Select distinct  [EXPENDITURETYPEEXPENDITURECATEGORYID],[EXPENDITURETYPEID],[EXPENDITURETYPEEXPENDITURETYPENAME] from [dbo].[EXT_fscmtopmodelam_pjfsetuptransactionsam_expendituretypeview] ) as exptype  on exptype.expendituretypeid=Rev.expendituretypeid 
+			left outer join (Select distinct [EXPENDITURECATEGORYID],[EXPENDITURECATEGORYNAME]  from EXT_fscmtopmodelam_pjfsetuptransactionsam_expenditurecategorytranslation) ExpCategory on expCategory.[EXPENDITURECATEGORYID]=exptype.[EXPENDITURETYPEEXPENDITURECATEGORYID]
+			where  fiscalday.[FISCALPERIODADJUSTMENTPERIODFLAG]='N'			 
+			and projdff.[PROJECT_NUMBER_] ='01259-000'
+			and fiscalday.[FISCALYEARNUMBER] + '-'  +  left(fiscalday.[FISCALPERIODNAME],3)='2017-Nov'
+	group by 
+	exptype.expendituretypeexpendituretypename,
+	TASK.[PROJECTBASEPEOPROJECTID],
+	TASK.[PROJELEMENTID],
+	TASK.[TASKSTRUCTUREBASEPEOELEMENTNUMBER] ,
+	TASK.[TASKSTRUCTURETRANSLATIONPEONAME],
+	TASK.[TASKSTRUCTUREBASEPEOCHARGEABLEFLAG],
+	TASK.[TASKSTRUCTUREBASEPEOBILLABLEFLAG],
+	TASK.[TASKSTRUCTUREBASEPEOPLANNINGENDDATE],
+	projdff.[PROJECT_NUMBER_] ,
+	PRojects.[PROJECTCODESPEOTEXTATTR10] ,
+	fiscalday.[FISCALYEARNUMBER] + '-'  +  left(fiscalday.[FISCALPERIODNAME],3),
+	fiscalday.reportdate,	
+	ExpCategory.[EXPENDITURECATEGORYID],
+	ExpCategory.[EXPENDITURECATEGORYNAME] ,
+	ExpType.[EXPENDITURETYPEID],
+	[DESC_CUSTOMER_];
+GO
+
+

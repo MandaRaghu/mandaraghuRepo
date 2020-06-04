@@ -1,0 +1,395 @@
+/****** Object:  View [EDW].[SUP_vw_Wex_Detail]    Script Date: 05-22-2020 17:51:50 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE VIEW [EDW].[SUP_vw_Wex_Detail] AS (
+	SELECT		Exception + ':' +
+				Cast(WeekEndingDate as Nvarchar) + ':' +
+				Cast(Supv_Number as Nvarchar) KeyField,
+				*
+	FROM		
+	(
+	SELECT		'10 or More Transactions Per Day' Exception,
+				cast(WexTrans.Date as datetime) +  8 - 
+				case when datepart(dw,cast(WexTrans.Date as datetime)) = 1 Then 8 Else 
+				datepart(dw,cast(WexTrans.Date as datetime)) END WeekEndingDate,
+				EMP.AREA_SUPERVISOR_NAME Supv_Name,
+				EMP.AREA_SUPERVISOR_NUMBER Supv_Number,			
+				rtrim(ltrim(isnull(EMP.LAST_NAME,''))) + ', ' + rtrim(Ltrim(isnull(EMP.FIRST_NAME,''))) + ' ' + rtrim(ltrim(isnull(EMP.MIDDLE_NAME,''))) Employee,
+				WexTrans.Odometer Fuel_Number,
+				coalesce((	SELECT		top 1 COALESCE(VH.VEHICLE_ID2_FW, 'Invalid Fuel Number') Unit_Number 
+							FROM		[EDW].[SUP_FW_Vehicles] VH 
+							WHERE VH.FUEL_NUMBER_FW = cast( WexTrans.Odometer as nvarchar)) , 'Invalid Fuel Number') Unit_Number,
+				WexTrans.Date Trans_Date,
+				right('00' + cast(datepart(hh, WexTrans.Time) as nvarchar),2) + ':' +
+				right('00' + cast(datepart(mi, WexTrans.Time) as nvarchar),2) Trans_Time,
+				WexTrans.Type Trans_Type,
+				WexTrans.ProductNam,
+				WexTrans.Gallons,
+				WexTrans.UnitCost,
+				WexTrans.Gross$,
+				WexTrans.SiteAdd,
+				WexTrans.SiteCity,
+				WexTrans.SiteSt,
+				WexTrans.SiteZip
+	FROM        [EDW].[SUP_WEX_TBL_t_Transactions] WexTrans,
+				[EDW].[SUP_TS_TBL_M_Employee_Hierarchy] Emp,
+				
+				(
+					SELECT		MoreThan10TransPerDay.PERSON_NUMBER,
+								MoreThan10TransPerDay.AREA_SUPERVISOR_NUMBER,
+								MoreThan10TransPerDay.AREA_SUPERVISOR_NAME,
+								MoreThan10TransPerDay.Trans_Date
+					FROM (
+								SELECT		EMP.PERSON_NUMBER, 
+											EMP.AREA_SUPERVISOR_NUMBER,
+											EMP.AREA_SUPERVISOR_NAME,
+											WexTrans.Date Trans_Date
+								FROM		[EDW].[SUP_WEX_TBL_t_Transactions] WexTrans,
+											[EDW].[SUP_TS_TBL_M_Employee_Hierarchy] Emp
+								WHERE		Date > GetDate() - 365 AND right('00000' + Emp.Person_Number,6) = right('00000' + WexTrans.DID,6)
+								GROUP BY	EMP.PERSON_NUMBER, 
+											EMP.AREA_SUPERVISOR_NUMBER,
+											EMP.AREA_SUPERVISOR_NAME,
+											WexTrans.Date
+								HAVING		COUNT(WexTrans.TrxID) >= 10) MoreThan10TransPerDay
+					WHERE		rtrim(ltrim(Coalesce(MoreThan10TransPerDay.AREA_SUPERVISOR_NUMBER, ''))) <> ''
+					Group BY	MoreThan10TransPerDay.PERSON_NUMBER,
+								MoreThan10TransPerDay.AREA_SUPERVISOR_NUMBER,
+								MoreThan10TransPerDay.AREA_SUPERVISOR_NAME,
+								MoreThan10TransPerDay.Trans_Date) MoreThan10TransPerDay
+								
+	WHERE		WexTrans.Date > GetDate() - 365 AND right('00000' + Emp.Person_Number,6) = right('00000' + WexTrans.DID,6)
+	AND			right('00000' + Emp.Person_Number,6) = right('00000' + MoreThan10TransPerDay.PERSON_NUMBER, 6)
+	AND			EMP.AREA_SUPERVISOR_NUMBER = MoreThan10TransPerDay.AREA_SUPERVISOR_NUMBER
+	AND			EMP.AREA_SUPERVISOR_NAME = MoreThan10TransPerDay.AREA_SUPERVISOR_NAME
+	AND			WexTrans.Date = MoreThan10TransPerDay.Trans_Date
+
+	UNION ALL
+
+	--SQL - Summary For Invalid Fuel Number Entered
+	SELECT		'Invalid Fuel Number Entered' Exception,
+				cast(WexTrans.Date as datetime) +  8 - 
+				case when datepart(dw,cast(WexTrans.Date as datetime)) = 1 Then 8 Else 
+				datepart(dw,cast(WexTrans.Date as datetime)) END WeekEndingDate,
+				EMP.AREA_SUPERVISOR_NAME Supv_Name,
+				EMP.AREA_SUPERVISOR_NUMBER Supv_Number,			
+				rtrim(ltrim(isnull(EMP.LAST_NAME,''))) + ', ' + rtrim(Ltrim(isnull(EMP.FIRST_NAME,''))) + ' ' + rtrim(ltrim(isnull(EMP.MIDDLE_NAME,''))) Employee,
+				WexTrans.Odometer Fuel_Number,
+				coalesce((	SELECT		top 1 COALESCE(VH.VEHICLE_ID2_FW, 'Invalid Fuel Number') Unit_Number 
+							FROM		[EDW].[SUP_FW_Vehicles] VH 
+							WHERE VH.FUEL_NUMBER_FW = cast( WexTrans.Odometer as nvarchar)) , 'Invalid Fuel Number') Unit_Number,
+				WexTrans.Date Trans_Date,
+				right('00' + cast(datepart(hh, WexTrans.Time) as nvarchar),2) + ':' +
+				right('00' + cast(datepart(mi, WexTrans.Time) as nvarchar),2) Trans_Time,
+				WexTrans.Type Trans_Type,
+				WexTrans.ProductNam,
+				WexTrans.Gallons,
+				WexTrans.UnitCost,
+				WexTrans.Gross$,
+				WexTrans.SiteAdd,
+				WexTrans.SiteCity,
+				WexTrans.SiteSt,
+				WexTrans.SiteZip
+	FROM        [EDW].[SUP_WEX_TBL_t_Transactions] WexTrans,
+				[EDW].[SUP_TS_TBL_M_Employee_Hierarchy] Emp
+	WHERE		coalesce((	SELECT		top 1 COALESCE(VH.VEHICLE_ID2_FW, 'Invalid Fuel Number') Unit_Number 
+							FROM		[EDW].[SUP_FW_Vehicles] VH 
+							WHERE VH.FUEL_NUMBER_FW = cast( WexTrans.Odometer as nvarchar)) , 'Invalid Fuel Number') = 'Invalid Fuel Number'
+	AND			WexTrans.Date > GetDate() - 365 AND right('00000' + Emp.Person_Number,6) = right('00000' + WexTrans.DID,6)
+	AND			rtrim(ltrim(Coalesce(Emp.AREA_SUPERVISOR_NUMBER, ''))) <> ''
+
+	UNION ALL
+
+	--SQL - Drill-Down Detail For Purchases Made in Non-Working States	
+	SELECT		'Purchases Made in Non-Working States' Exception,
+				cast(WexTrans.Date as datetime) +  8 - 
+				case when datepart(dw,cast(WexTrans.Date as datetime)) = 1 Then 8 Else 
+				datepart(dw,cast(WexTrans.Date as datetime)) END WeekEndingDate,
+				EMP.AREA_SUPERVISOR_NAME Supv_Name,
+				EMP.AREA_SUPERVISOR_NUMBER Supv_Number,			
+				rtrim(ltrim(isnull(EMP.LAST_NAME,''))) + ', ' + rtrim(Ltrim(isnull(EMP.FIRST_NAME,''))) + ' ' + rtrim(ltrim(isnull(EMP.MIDDLE_NAME,''))) Employee,
+				WexTrans.Odometer Fuel_Number,
+				coalesce((	SELECT		top 1 COALESCE(VH.VEHICLE_ID2_FW, 'Invalid Fuel Number') Unit_Number 
+							FROM		[EDW].[SUP_FW_Vehicles] VH 
+							WHERE VH.FUEL_NUMBER_FW = cast( WexTrans.Odometer as nvarchar)) , 'Invalid Fuel Number') Unit_Number,
+				WexTrans.Date Trans_Date,
+				right('00' + cast(datepart(hh, WexTrans.Time) as nvarchar),2) + ':' +
+				right('00' + cast(datepart(mi, WexTrans.Time) as nvarchar),2) Trans_Time,
+				WexTrans.Type Trans_Type,
+				WexTrans.ProductNam,
+				WexTrans.Gallons,
+				WexTrans.UnitCost,
+				WexTrans.Gross$,
+				WexTrans.SiteAdd,
+				WexTrans.SiteCity,
+				WexTrans.SiteSt,
+				WexTrans.SiteZip
+	FROM        [EDW].[SUP_WEX_TBL_t_Transactions] WexTrans,
+				[EDW].[SUP_TS_TBL_M_Employee_Hierarchy] Emp
+	WHERE		WexTrans.SiteSt in ('AK','CT','DE','ID','IA','KS','ME','MA','MI','MN','MT','NE','NV','NH','NJ',
+																'NY','ND','OR','RI','SD','VT','WA','WI','WY','AB','BC','MB','NB','NL','NT',
+																'NS','ON','PE','QC','SK','YT')
+	AND			WexTrans.Date > GetDate() - 365 AND right('00000' + Emp.Person_Number,6) = right('00000' + WexTrans.DID,6)
+	AND			rtrim(ltrim(Coalesce(Emp.AREA_SUPERVISOR_NUMBER, ''))) <> ''
+
+	UNION ALL
+
+	--SQL - Drill-Down Detail For Purchases Made between 10PM and 4AM	
+	SELECT		'Purchases Made Between 10PM and 4AM' Exception,
+				cast(WexTrans.Date as datetime) +  8 - 
+				case when datepart(dw,cast(WexTrans.Date as datetime)) = 1 Then 8 Else 
+				datepart(dw,cast(WexTrans.Date as datetime)) END WeekEndingDate,
+				EMP.AREA_SUPERVISOR_NAME Supv_Name,
+				EMP.AREA_SUPERVISOR_NUMBER Supv_Number,			
+				rtrim(ltrim(isnull(EMP.LAST_NAME,''))) + ', ' + rtrim(Ltrim(isnull(EMP.FIRST_NAME,''))) + ' ' + rtrim(ltrim(isnull(EMP.MIDDLE_NAME,''))) Employee,
+				WexTrans.Odometer Fuel_Number,
+				coalesce((	SELECT		top 1 COALESCE(VH.VEHICLE_ID2_FW, 'Invalid Fuel Number') Unit_Number 
+							FROM		[EDW].[SUP_FW_Vehicles] VH 
+							WHERE VH.FUEL_NUMBER_FW = cast( WexTrans.Odometer as nvarchar)) , 'Invalid Fuel Number') Unit_Number,
+				WexTrans.Date Trans_Date,
+				right('00' + cast(datepart(hh, WexTrans.Time) as nvarchar),2) + ':' +
+				right('00' + cast(datepart(mi, WexTrans.Time) as nvarchar),2) Trans_Time,
+				WexTrans.Type Trans_Type,
+				WexTrans.ProductNam,
+				WexTrans.Gallons,
+				WexTrans.UnitCost,
+				WexTrans.Gross$,
+				WexTrans.SiteAdd,
+				WexTrans.SiteCity,
+				WexTrans.SiteSt,
+				WexTrans.SiteZip
+	FROM        [EDW].[SUP_WEX_TBL_t_Transactions] WexTrans,
+				[EDW].[SUP_TS_TBL_M_Employee_Hierarchy] Emp
+	WHERE		(WexTrans.time between '1899-12-30 22:00:00' and '1899-12-30 23:59:59'
+				OR WexTrans.time between '1899-12-30 00:00:00' and '1899-12-30 00:04:00')
+	AND			WexTrans.Date > GetDate() - 365 AND right('00000' + Emp.Person_Number,6) = right('00000' + WexTrans.DID,6)
+	AND			rtrim(ltrim(Coalesce(Emp.AREA_SUPERVISOR_NUMBER, ''))) <> ''
+
+	UNION ALL
+
+	--SQL - Drill-Down Detail For More Than 10 Transactions Per Day Per Employee
+
+	SELECT		'Over $1000 in a Day' Exception,
+				cast(WexTrans.Date as datetime) +  8 - 
+				case when datepart(dw,cast(WexTrans.Date as datetime)) = 1 Then 8 Else 
+				datepart(dw,cast(WexTrans.Date as datetime)) END WeekEndingDate,
+				EMP.AREA_SUPERVISOR_NAME Supv_Name,
+				EMP.AREA_SUPERVISOR_NUMBER Supv_Number,			
+				rtrim(ltrim(isnull(EMP.LAST_NAME,''))) + ', ' + rtrim(Ltrim(isnull(EMP.FIRST_NAME,''))) + ' ' + rtrim(ltrim(isnull(EMP.MIDDLE_NAME,''))) Employee,
+				WexTrans.Odometer Fuel_Number,
+				coalesce((	SELECT		top 1 COALESCE(VH.VEHICLE_ID2_FW, 'Invalid Fuel Number') Unit_Number 
+							FROM		[EDW].[SUP_FW_Vehicles] VH 
+							WHERE VH.FUEL_NUMBER_FW = cast( WexTrans.Odometer as nvarchar)) , 'Invalid Fuel Number') Unit_Number,
+				WexTrans.Date Trans_Date,
+				right('00' + cast(datepart(hh, WexTrans.Time) as nvarchar),2) + ':' +
+				right('00' + cast(datepart(mi, WexTrans.Time) as nvarchar),2) Trans_Time,
+				WexTrans.Type Trans_Type,
+				WexTrans.ProductNam,
+				WexTrans.Gallons,
+				WexTrans.UnitCost,
+				WexTrans.Gross$,
+				WexTrans.SiteAdd,
+				WexTrans.SiteCity,
+				WexTrans.SiteSt,
+				WexTrans.SiteZip
+	FROM        [EDW].[SUP_WEX_TBL_t_Transactions] WexTrans,
+				[EDW].[SUP_TS_TBL_M_Employee_Hierarchy] Emp,				
+				(
+					SELECT		MoreThan$1000PerDay.PERSON_NUMBER,
+								MoreThan$1000PerDay.AREA_SUPERVISOR_NUMBER,
+								MoreThan$1000PerDay.AREA_SUPERVISOR_NAME,
+								MoreThan$1000PerDay.Trans_Date
+					FROM (
+									
+								SELECT		EMP.PERSON_NUMBER, 
+											EMP.AREA_SUPERVISOR_NUMBER,
+											EMP.AREA_SUPERVISOR_NAME,
+											WexTrans.Date Trans_Date
+								FROM		[EDW].[SUP_WEX_TBL_t_Transactions] WexTrans,
+											[EDW].[SUP_TS_TBL_M_Employee_Hierarchy] Emp
+								WHERE		Date > GetDate() - 365 AND right('00000' + Emp.Person_Number,6) = right('00000' + WexTrans.DID,6)
+								GROUP BY	EMP.PERSON_NUMBER, 
+											EMP.AREA_SUPERVISOR_NUMBER,
+											EMP.AREA_SUPERVISOR_NAME,
+											WexTrans.Date
+								HAVING		sum(WexTrans.Gross$) >= 1000) MoreThan$1000PerDay
+					WHERE		rtrim(ltrim(Coalesce(MoreThan$1000PerDay.AREA_SUPERVISOR_NUMBER, ''))) <> ''
+					Group BY	MoreThan$1000PerDay.PERSON_NUMBER,
+								MoreThan$1000PerDay.AREA_SUPERVISOR_NUMBER,
+								MoreThan$1000PerDay.AREA_SUPERVISOR_NAME,
+								MoreThan$1000PerDay.Trans_Date) MoreThan$1000PerDay							
+	WHERE		WexTrans.Date > GetDate() - 365 AND right('00000' + Emp.Person_Number,6) = right('00000' + WexTrans.DID,6)
+	AND			right('00000' + Emp.Person_Number,6) = right('00000' + MoreThan$1000PerDay.PERSON_NUMBER, 6)
+	AND			EMP.AREA_SUPERVISOR_NUMBER = MoreThan$1000PerDay.AREA_SUPERVISOR_NUMBER
+	AND			EMP.AREA_SUPERVISOR_NAME = MoreThan$1000PerDay.AREA_SUPERVISOR_NAME
+	AND			WexTrans.Date = MoreThan$1000PerDay.Trans_Date
+
+	Union All
+
+	--SQL - Drill-Down Detail For Over $200 On A Single Purchase
+	SELECT		'Over $200 on a Single Purchase' Exception,
+				cast(WexTrans.Date as datetime) +  8 - 
+				case when datepart(dw,cast(WexTrans.Date as datetime)) = 1 Then 8 Else 
+				datepart(dw,cast(WexTrans.Date as datetime)) END WeekEndingDate,
+				EMP.AREA_SUPERVISOR_NAME Supv_Name,
+				EMP.AREA_SUPERVISOR_NUMBER Supv_Number,			
+				rtrim(ltrim(isnull(EMP.LAST_NAME,''))) + ', ' + rtrim(Ltrim(isnull(EMP.FIRST_NAME,''))) + ' ' + rtrim(ltrim(isnull(EMP.MIDDLE_NAME,''))) Employee,
+				WexTrans.Odometer Fuel_Number,
+				coalesce((	SELECT		top 1 COALESCE(VH.VEHICLE_ID2_FW, 'Invalid Fuel Number') Unit_Number 
+							FROM		[EDW].[SUP_FW_Vehicles] VH 
+							WHERE VH.FUEL_NUMBER_FW = cast( WexTrans.Odometer as nvarchar)) , 'Invalid Fuel Number') Unit_Number,
+				WexTrans.Date Trans_Date,
+				right('00' + cast(datepart(hh, WexTrans.Time) as nvarchar),2) + ':' +
+				right('00' + cast(datepart(mi, WexTrans.Time) as nvarchar),2) Trans_Time,
+				WexTrans.Type Trans_Type,
+				WexTrans.ProductNam,
+				WexTrans.Gallons,
+				WexTrans.UnitCost,
+				WexTrans.Gross$,
+				WexTrans.SiteAdd,
+				WexTrans.SiteCity,
+				WexTrans.SiteSt,
+				WexTrans.SiteZip
+	FROM        [EDW].[SUP_WEX_TBL_t_Transactions] WexTrans,
+				[EDW].[SUP_TS_TBL_M_Employee_Hierarchy] Emp
+	WHERE		WexTrans.Gross$ > 200
+	AND			WexTrans.Date > GetDate() - 365 AND right('00000' + Emp.Person_Number,6) = right('00000' + WexTrans.DID,6)
+	AND			rtrim(ltrim(Coalesce(Emp.AREA_SUPERVISOR_NUMBER, ''))) <> ''
+
+	UNION ALL
+
+	--SQL - Drill-Down Detail For More Than 200 Gallons Per Day Per Employee
+
+	SELECT		'More Than 200 Gallons in a Day' Exception,
+				cast(WexTrans.Date as datetime) +  8 - 
+				case when datepart(dw,cast(WexTrans.Date as datetime)) = 1 Then 8 Else 
+				datepart(dw,cast(WexTrans.Date as datetime)) END WeekEndingDate,
+				EMP.AREA_SUPERVISOR_NAME Supv_Name,
+				EMP.AREA_SUPERVISOR_NUMBER Supv_Number,			
+				rtrim(ltrim(isnull(EMP.LAST_NAME,''))) + ', ' + rtrim(Ltrim(isnull(EMP.FIRST_NAME,''))) + ' ' + rtrim(ltrim(isnull(EMP.MIDDLE_NAME,''))) Employee,
+				WexTrans.Odometer Fuel_Number,
+				coalesce((	SELECT		top 1 COALESCE(VH.VEHICLE_ID2_FW, 'Invalid Fuel Number') Unit_Number 
+							FROM		[EDW].[SUP_FW_Vehicles] VH 
+							WHERE VH.FUEL_NUMBER_FW = cast( WexTrans.Odometer as nvarchar)) , 'Invalid Fuel Number') Unit_Number,
+				WexTrans.Date Trans_Date,
+				right('00' + cast(datepart(hh, WexTrans.Time) as nvarchar),2) + ':' +
+				right('00' + cast(datepart(mi, WexTrans.Time) as nvarchar),2) Trans_Time,
+				WexTrans.Type Trans_Type,
+				WexTrans.ProductNam,
+				WexTrans.Gallons,
+				WexTrans.UnitCost,
+				WexTrans.Gross$,
+				WexTrans.SiteAdd,
+				WexTrans.SiteCity,
+				WexTrans.SiteSt,
+				WexTrans.SiteZip
+	FROM        [EDW].[SUP_WEX_TBL_t_Transactions] WexTrans,
+				[EDW].[SUP_TS_TBL_M_Employee_Hierarchy] Emp,
+				
+				(
+					SELECT		MoreThan200GallonsPerDay.PERSON_NUMBER,
+								MoreThan200GallonsPerDay.AREA_SUPERVISOR_NUMBER,
+								MoreThan200GallonsPerDay.AREA_SUPERVISOR_NAME,
+								MoreThan200GallonsPerDay.Trans_Date
+					FROM (
+									
+								SELECT		EMP.PERSON_NUMBER, 
+											EMP.AREA_SUPERVISOR_NUMBER,
+											EMP.AREA_SUPERVISOR_NAME,
+											WexTrans.Date Trans_Date
+								FROM		[EDW].[SUP_WEX_TBL_t_Transactions] WexTrans,
+											[EDW].[SUP_TS_TBL_M_Employee_Hierarchy] Emp
+								WHERE		Date > GetDate() - 365 AND right('00000' + Emp.Person_Number,6) = right('00000' + WexTrans.DID,6)
+								GROUP BY	EMP.PERSON_NUMBER, 
+											EMP.AREA_SUPERVISOR_NUMBER,
+											EMP.AREA_SUPERVISOR_NAME,
+											WexTrans.Date
+								HAVING		sum(WexTrans.Gallons) >= 200) MoreThan200GallonsPerDay
+					WHERE		rtrim(ltrim(Coalesce(MoreThan200GallonsPerDay.AREA_SUPERVISOR_NUMBER, ''))) <> ''
+					Group BY	MoreThan200GallonsPerDay.PERSON_NUMBER,
+								MoreThan200GallonsPerDay.AREA_SUPERVISOR_NUMBER,
+								MoreThan200GallonsPerDay.AREA_SUPERVISOR_NAME,
+								MoreThan200GallonsPerDay.Trans_Date) MoreThan200GallonsPerDay							
+	WHERE		WexTrans.Date > GetDate() - 365 AND right('00000' + Emp.Person_Number,6) = right('00000' + WexTrans.DID,6)
+	AND			right('00000' + Emp.Person_Number,6) = right('00000' + MoreThan200GallonsPerDay.PERSON_NUMBER, 6)
+	AND			EMP.AREA_SUPERVISOR_NUMBER = MoreThan200GallonsPerDay.AREA_SUPERVISOR_NUMBER
+	AND			EMP.AREA_SUPERVISOR_NAME = MoreThan200GallonsPerDay.AREA_SUPERVISOR_NAME
+	AND			WexTrans.Date = MoreThan200GallonsPerDay.Trans_Date
+
+	UNION ALL
+
+	--SQL - Drill-Down Detail For Non-Fuel Purchases	
+	SELECT		'Non-Fuel Transactions' Exception,
+				cast(WexTrans.Date as datetime) +  8 - 
+				case when datepart(dw,cast(WexTrans.Date as datetime)) = 1 Then 8 Else 
+				datepart(dw,cast(WexTrans.Date as datetime)) END WeekEndingDate,
+				EMP.AREA_SUPERVISOR_NAME Supv_Name,
+				EMP.AREA_SUPERVISOR_NUMBER Supv_Number,			
+				rtrim(ltrim(isnull(EMP.LAST_NAME,''))) + ', ' + rtrim(Ltrim(isnull(EMP.FIRST_NAME,''))) + ' ' + rtrim(ltrim(isnull(EMP.MIDDLE_NAME,''))) Employee,
+				WexTrans.Odometer Fuel_Number,
+				coalesce((	SELECT		top 1 COALESCE(VH.VEHICLE_ID2_FW, 'Invalid Fuel Number') Unit_Number 
+							FROM		[EDW].[SUP_FW_Vehicles] VH 
+							WHERE VH.FUEL_NUMBER_FW = cast( WexTrans.Odometer as nvarchar)) , 'Invalid Fuel Number') Unit_Number,
+				WexTrans.Date Trans_Date,
+				right('00' + cast(datepart(hh, WexTrans.Time) as nvarchar),2) + ':' +
+				right('00' + cast(datepart(mi, WexTrans.Time) as nvarchar),2) Trans_Time,
+				WexTrans.Type Trans_Type,
+				WexTrans.ProductNam,
+				WexTrans.Gallons,
+				WexTrans.UnitCost,
+				WexTrans.Gross$,
+				WexTrans.SiteAdd,
+				WexTrans.SiteCity,
+				WexTrans.SiteSt,
+				WexTrans.SiteZip
+	FROM        [EDW].[SUP_WEX_TBL_t_Transactions] WexTrans,
+				[EDW].[SUP_TS_TBL_M_Employee_Hierarchy] Emp
+	WHERE		WexTrans.ProductNam not in ('DEF','DS+','DIESEL','DSL','DSL+','E85','ETHANL85','FARM','FUL OTH','JETA','PREM DSL','SALES TX','SUPALC10','SUPALC57',
+												'SUPALC77','SUPER UN','UN+ALC10','UNL PLUS','UNLALC10','UNLALC57','UNLALC77','UNLEADED','UN+','UN+ALC57','UN+ALC77',
+												'UNA','UNB','UNC','UNL','U+A','ULSD','SUP','FRM','ETH','FUL','REF','MFUL','METH')
+	AND			WexTrans.Date > GetDate() - 365 AND right('00000' + Emp.Person_Number,6) = right('00000' + WexTrans.DID,6)
+	AND			rtrim(ltrim(Coalesce(Emp.AREA_SUPERVISOR_NUMBER, ''))) <> ''
+
+	UNION ALL
+	--SQL - Drill-Down Detail For Gasoline Charged To Diesel	
+	SELECT		'Gasoline Charged to Diesel Type Unit' Exception,
+				cast(WexTrans.Date as datetime) +  8 - 
+				case when datepart(dw,cast(WexTrans.Date as datetime)) = 1 Then 8 Else 
+				datepart(dw,cast(WexTrans.Date as datetime)) END WeekEndingDate,
+				EMP.AREA_SUPERVISOR_NAME Supv_Name,
+				EMP.AREA_SUPERVISOR_NUMBER Supv_Number,			
+				rtrim(ltrim(isnull(EMP.LAST_NAME,''))) + ', ' + rtrim(Ltrim(isnull(EMP.FIRST_NAME,''))) + ' ' + rtrim(ltrim(isnull(EMP.MIDDLE_NAME,''))) Employee,
+				WexTrans.Odometer Fuel_Number,
+				coalesce((	SELECT		top 1 COALESCE(VH.VEHICLE_ID2_FW, 'Invalid Fuel Number') Unit_Number 
+							FROM		[EDW].[SUP_FW_Vehicles] VH 
+							WHERE VH.FUEL_NUMBER_FW = cast( WexTrans.Odometer as nvarchar)) , 'Invalid Fuel Number') Unit_Number,
+				WexTrans.Date Trans_Date,
+				right('00' + cast(datepart(hh, WexTrans.Time) as nvarchar),2) + ':' +
+				right('00' + cast(datepart(mi, WexTrans.Time) as nvarchar),2) Trans_Time,
+				WexTrans.Type Trans_Type,
+				WexTrans.ProductNam,
+				WexTrans.Gallons,
+				WexTrans.UnitCost,
+				WexTrans.Gross$,
+				WexTrans.SiteAdd,
+				WexTrans.SiteCity,
+				WexTrans.SiteSt,
+				WexTrans.SiteZip
+	FROM        [EDW].[SUP_WEX_TBL_t_Transactions] WexTrans,
+				[EDW].[SUP_TS_TBL_M_Employee_Hierarchy] Emp
+	WHERE		WexTrans.ProductNam in ('E85','ETHANL85','SUPER UN','UN+ALC10','UNL PLUS','UNLALC10','UNLALC57','UNLALC77','UNLEADED','UN+','UN+ALC57','UN+ALC77',
+												'UNA','UNB','UNC','UNL','U+A','ULSD')
+				AND (SELECT TOP 1 VH.FUEL_TYPE_FW FROM EDW.SUP_FW_Vehicles VH WHERE cast(WexTrans.Odometer as nvarchar) = VH.FUEL_NUMBER_FW) = 'DL'
+				
+	AND			WexTrans.Date > GetDate() - 365 AND right('00000' + Emp.Person_Number,6) = right('00000' + WexTrans.DID,6)
+	AND			rtrim(ltrim(Coalesce(Emp.AREA_SUPERVISOR_NUMBER, ''))) <> '') Main_Query 
+	WHERE		len(Main_Query. Supv_Number) <= 6
+	--ORDER BY	Exception, Supv_Name, WeekEndingDate, Employee, Trans_Date
+	);
+GO
+
+

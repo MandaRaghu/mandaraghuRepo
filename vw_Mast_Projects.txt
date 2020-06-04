@@ -1,0 +1,13 @@
+/****** Object:  View [dbo].[vw_Mast_Projects]    Script Date: 05-22-2020 17:47:10 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE VIEW [dbo].[vw_Mast_Projects]
+AS select distinct projectid as ProjectID 
+	from [dbo].[EXT_fscmtopmodelam_pjfprojectam_project];
+GO
+
+

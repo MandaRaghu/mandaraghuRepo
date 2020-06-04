@@ -1,0 +1,64 @@
+select 
+		pc1.[Project_Number_dff]
+		--inv1.[Project_Number_dff]
+		,pc1.[ACCOUNTING_PERIOD_NAME]
+		--,inv1.[ACCOUNTING_PERIOD_NAME]
+		--,pc1.[TASK_NUMBER]
+	  ,sum(pc1.[Total_Cost]) as [Total_Cost]
+      ,sum(pc1.[labor_Cost]) as [labor_Cost]
+      ,sum(pc1.[Equipment_Cost]) as [Equipment_Cost]
+      ,sum(pc1.[Materials_Cost]) as [Materials_Cost]
+      ,sum(pc1.[Subcontract_Cost]) as [Subcontract_Cost]
+      ,sum(pc1.[OverHead_Cost]) as [OverHead_Cost]
+      ,sum(pc1.[PROD_LABOR_HOURS]) as [PROD_LABOR_HOURS]
+	  ,sum(inv1.[Billed_Amount]) as [Billed_Amount]
+From
+(
+SELECT 
+		pc.[PROJECT_NAME]
+		,pc.[Project_Number_dff]
+		,pc.[ACCOUNTING_PERIOD_NAME]
+		,pc.[TASK_NUMBER]
+      ,SUM(pc.[Total_Cost]) as Total_Cost
+      ,SUM(pc.[labor_Cost]) as labor_Cost
+      ,SUM(pc.[Equipment_Cost]) as Equipment_Cost
+      ,SUM(pc.[Materials_Cost]) as Materials_Cost
+      ,SUM(pc.[Subcontract_Cost]) as Subcontract_Cost
+      ,SUM(pc.[OverHead_Cost]) as OverHead_Cost
+      ,SUM(pc.[PROD_LABOR_HOURS]) as PROD_LABOR_HOURS
+
+  FROM [dbo].[vw_raghu_Project_cost] pc
+  group by 
+  		pc.[PROJECT_NAME]
+		,pc.[Project_Number_dff]
+		,pc.[ACCOUNTING_PERIOD_NAME]
+		,pc.[TASK_NUMBER]
+  ) pc1
+  full outer join
+  ( select
+  		inv.[PROJECT_NAME]
+		,inv.[Project_Number_dff]
+		,inv.[ACCOUNTING_PERIOD_NAME]
+		,inv.[TASK_NUMBER]
+	  ,SUM(inv.[Billed_Amount]) as Billed_Amount
+	From [dbo].[vw_raghu_inv_summary] inv
+	group by
+	  		inv.[PROJECT_NAME]
+		,inv.[Project_Number_dff]
+		,inv.[ACCOUNTING_PERIOD_NAME]
+		,inv.[TASK_NUMBER]
+	) inv1
+--where 
+--1=1
+-- and 
+ on 1=1 
+ --and inv1.[PROJECT_NAME]=pc1.[PROJECT_NAME]
+ and inv1.[Project_Number_dff]=pc1.[Project_Number_dff]
+ and inv1.[TASK_NUMBER]=pc1.[TASK_NUMBER]
+ and inv1.[ACCOUNTING_PERIOD_NAME]=pc1.[ACCOUNTING_PERIOD_NAME]
+ group by 
+ pc1.[Project_Number_dff]
+ --inv1.[Project_Number_dff]
+		,pc1.[ACCOUNTING_PERIOD_NAME]
+		--,inv1.[ACCOUNTING_PERIOD_NAME]
+		--,pc1.[TASK_NUMBER]

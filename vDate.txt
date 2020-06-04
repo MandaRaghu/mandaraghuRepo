@@ -1,0 +1,72 @@
+/****** Object:  View [DW].[vDate]    Script Date: 05-22-2020 17:54:55 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE VIEW [DW].[vDate]
+AS SELECT DateSK
+      ,Date
+      ,DateName
+      ,DateDescription
+      ,YearName
+      ,QuarterName
+      ,QuarterInYear
+      ,QuarterAndYear
+      ,QuarterAndYearSort
+      ,MonthName
+      ,MonthNameAbbr
+      ,MonthInQuarter
+      ,MonthInYear
+      ,MonthAndYear
+      ,MonthAndYearSort
+      ,MonthAndYearSortForDisplay
+      ,MonthAndYearAbbr
+	  ,CAST(CASE 
+		 WHEN DayName = 'Monday'		THEN DATEADD(dd,6,[Date])
+		 WHEN DayName = 'Tuesday'	THEN DATEADD(dd,5,[Date])
+		 WHEN DayName = 'Wednesday'	THEN DATEADD(dd,4,[Date])
+		 WHEN DayName = 'Thursday'	THEN DATEADD(dd,3,[Date])
+		 WHEN DayName = 'Friday'		THEN DATEADD(dd,2,[Date])
+		 WHEN DayName = 'Saturday'	THEN DATEADD(dd,1,[Date])
+		 ELSE [Date] END AS DATE) AS WeekEndingDate 
+      ,WeekName
+      ,WeekInMonth
+      ,WeekInQuarter
+      ,WeekInYear
+      ,WeekAndYear
+      ,WeekAndYearSort
+      ,DayName
+      ,DayNameAbbr
+      ,DayInWeek
+      ,DayInMonth
+      ,DayInQuarter
+      ,DayInYear
+      ,IsHoliday
+      ,IsWeekday
+      ,IsWorkDay
+      ,IsLastDayInWeek
+      ,IsLastDayInMonth
+      ,IsLastDayInQuarter
+      ,IsLastDayInYear
+      ,IsToday
+      ,IsYesterday
+      ,IsCurrentMonth
+      ,IsCurrentMonthLastYear
+      ,IsCurrentQuarter
+      ,IsCurrentQuarterLastYear
+      ,IsCurrentYear
+      ,IsLastYear
+      ,IsRolling13Months
+      ,ETLPipelineID
+      ,ETLActivityName
+      ,ETLInsertDate
+      ,ETLModifyDate
+      ,ETLWindowStart
+      ,ETLWindowEnd
+      ,ETLErrorRowID
+    FROM [DW].[Date];
+GO
+
+

@@ -1,0 +1,24 @@
+/****** Object:  View [dbo].[vw_WWOR_Cost_Rev_By_ExpType]    Script Date: 05-22-2020 18:19:03 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE VIEW [dbo].[vw_WWOR_Cost_Rev_By_ExpType]
+AS select (Project_Number+'-'+Accounting_Period_Name) as KeyId, Project_Number, Accounting_Period_Name, EXPENDITURE_TYPE_NAME, SUM( [Total Cost]) as [Total Cost] , SUM(Revenue) AS Revenue, SUM([Production Hours]) as [Production Hours]
+from (
+	select Project_Number,Accounting_Period_Name, EXPENDITURE_TYPE_NAME, SUM(total_cost) [Total Cost], 0 as Revenue, SUM(Production_Hours) [Production Hours]
+	from Vw_Cost
+	group by Project_Number,Accounting_Period_Name, EXPENDITURE_TYPE_NAME
+
+	Union
+
+	select Project_Number,Accounting_Period_Name, EXPENDITURE_TYPE_NAME, 0 [Total Cost], SUM(Revenue) as Revenue, 0 [Production Hours]
+	from [vw_Revenue]
+	group by Project_Number,Accounting_Period_Name, EXPENDITURE_TYPE_NAME
+)a
+group by Project_Number,Accounting_Period_Name, EXPENDITURE_TYPE_NAME;
+GO
+
+

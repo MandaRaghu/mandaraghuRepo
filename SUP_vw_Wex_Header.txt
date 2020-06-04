@@ -1,0 +1,248 @@
+/****** Object:  View [EDW].[SUP_vw_Wex_Header]    Script Date: 05-22-2020 17:53:33 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE VIEW [EDW].[SUP_vw_Wex_Header]
+AS (
+	SELECT		Exception + ':' +
+			Cast(WeekEndingDate as Nvarchar) + ':' +
+			Cast(Supv_Number as Nvarchar) KeyField,
+			*
+FROM
+(--SQL - Summary For More Than 10 Transactions Per Day Per Employee
+SELECT		
+		'10 or More Transactions Per Day' Exception,
+			MoreThan10TransPerDay.AREA_SUPERVISOR_NUMBER Supv_Number,
+			MoreThan10TransPerDay.AREA_SUPERVISOR_NAME Supv_Name,
+			cast(MoreThan10TransPerDay.DATE as datetime) +  8 - 
+			case when datepart(dw,cast(MoreThan10TransPerDay.DATE as datetime)) = 1 Then 8 Else 
+			datepart(dw,cast(MoreThan10TransPerDay.DATE as datetime)) END WeekEndingDate,
+			COUNT(MoreThan10TransPerDay.Date) NumOfIncidents
+FROM (
+			SELECT		EMP.PERSON_NUMBER, 
+						EMP.AREA_SUPERVISOR_NUMBER,
+						EMP.AREA_SUPERVISOR_NAME,
+						WexTrans.Date
+			FROM		[EDW].[SUP_WEX_TBL_t_Transactions] WexTrans,
+						[EDW].[SUP_TS_TBL_M_Employee_Hierarchy] Emp
+			WHERE		Date > GetDate() - 365 AND right('00000' + Emp.Person_Number,6) = right('00000' + WexTrans.DID,6)
+			GROUP BY	EMP.PERSON_NUMBER, 
+						EMP.AREA_SUPERVISOR_NUMBER,
+						EMP.AREA_SUPERVISOR_NAME,
+						WexTrans.Date
+			HAVING		COUNT(WexTrans.TrxID) >= 10) MoreThan10TransPerDay
+WHERE		rtrim(ltrim(coalesce(MoreThan10TransPerDay.AREA_SUPERVISOR_NAME, ''))) <> ''
+Group BY	MoreThan10TransPerDay.AREA_SUPERVISOR_NUMBER,
+			MoreThan10TransPerDay.AREA_SUPERVISOR_NAME,
+			cast(MoreThan10TransPerDay.DATE as datetime) +  8 - 
+			case when datepart(dw,cast(MoreThan10TransPerDay.DATE as datetime)) = 1 Then 8 Else 
+			datepart(dw,cast(MoreThan10TransPerDay.DATE as datetime)) END
+
+UNION ALL
+
+--SQL - Summary For Invalid Fuel Number Entered
+SELECT			'Invalid Fuel Number Entered' Exception,
+				Emp.AREA_SUPERVISOR_NUMBER Supv_Number,
+				Emp.AREA_SUPERVISOR_NAME Supv_Name,	
+				cast(WexTrans.Date as datetime) +  8 - 
+				case when datepart(dw,cast(WexTrans.Date as datetime)) = 1 Then 8 Else 
+				datepart(dw,cast(WexTrans.Date as datetime)) END WeekEndingDate,			
+				Count(WexTrans.SiteSt) NumOfIncidents
+FROM			[EDW].[SUP_WEX_TBL_t_Transactions] WexTrans,
+				[EDW].[SUP_TS_TBL_M_Employee_Hierarchy] Emp
+WHERE			coalesce((	SELECT		top 1 COALESCE(VH.VEHICLE_ID2_FW, 'Invalid Fuel Number') Unit_Number 
+						FROM		[EDW].[SUP_FW_Vehicles] VH 
+						WHERE VH.FUEL_NUMBER_FW = cast( WexTrans.Odometer as nvarchar)) , 'Invalid Fuel Number') = 'Invalid Fuel Number'
+AND				WexTrans.Date > GetDate() - 365
+AND				right('00000' + Emp.Person_Number,6) = right('00000' + WexTrans.DID,6)
+AND				rtrim(ltrim(coalesce(EMP.AREA_SUPERVISOR_NAME, ''))) <> ''
+Group BY		Emp.AREA_SUPERVISOR_NAME,
+				Emp.AREA_SUPERVISOR_NUMBER,
+				cast(WexTrans.Date as datetime) +  8 - 
+				case when datepart(dw,cast(WexTrans.Date as datetime)) = 1 Then 8 Else 
+				datepart(dw,cast(WexTrans.Date as datetime)) END
+
+UNION ALL
+--SQL - Summary For Purchases Made in Non-Working States
+SELECT			'Purchases Made in Non-Working States' Exception,
+				Emp.AREA_SUPERVISOR_NUMBER Supv_Number,
+				Emp.AREA_SUPERVISOR_NAME Supv_Name,	
+				cast(WexTrans.Date as datetime) +  8 - 
+				case when datepart(dw,cast(WexTrans.Date as datetime)) = 1 Then 8 Else 
+				datepart(dw,cast(WexTrans.Date as datetime)) END WeekEndingDate,			
+				Count(WexTrans.SiteSt) NumOfIncidents
+FROM			[EDW].[SUP_WEX_TBL_t_Transactions] WexTrans,
+				[EDW].[SUP_TS_TBL_M_Employee_Hierarchy] Emp
+WHERE			WexTrans.SiteSt in ('AK','CT','DE','ID','IA','KS','ME','MA','MI','MN','MT','NE','NV','NH','NJ',
+											'NY','ND','OR','RI','SD','VT','WA','WI','WY','AB','BC','MB','NB','NL','NT',
+											'NS','ON','PE','QC','SK','YT')
+AND				WexTrans.Date > GetDate() - 365
+AND				right('00000' + Emp.Person_Number,6) = right('00000' + WexTrans.DID,6)
+AND				rtrim(ltrim(coalesce(EMP.AREA_SUPERVISOR_NAME, ''))) <> ''
+Group BY		Emp.AREA_SUPERVISOR_NAME,
+				Emp.AREA_SUPERVISOR_NUMBER,
+				cast(WexTrans.Date as datetime) +  8 - 
+				case when datepart(dw,cast(WexTrans.Date as datetime)) = 1 Then 8 Else 
+				datepart(dw,cast(WexTrans.Date as datetime)) END
+
+UNION ALL
+
+--SQL - Summary For Purchases Made between 10PM and 4AM
+SELECT			'Purchases Made Between 10PM and 4AM' Exception,
+				Emp.AREA_SUPERVISOR_NUMBER Supv_Number,
+				Emp.AREA_SUPERVISOR_NAME Supv_Name,
+				cast(WexTrans.Date as datetime) +  8 - 
+				case when datepart(dw,cast(WexTrans.Date as datetime)) = 1 Then 8 Else 
+				datepart(dw,cast(WexTrans.Date as datetime)) END WeekEndingDate,				
+				Count(WexTrans.SiteSt) NumOfIncidents
+FROM			[EDW].[SUP_WEX_TBL_t_Transactions] WexTrans,
+				[EDW].[SUP_TS_TBL_M_Employee_Hierarchy] Emp
+WHERE			(WexTrans.time between '1899-12-30 22:00:00' and '1899-12-30 23:59:59'
+OR				WexTrans.time between '1899-12-30 00:00:00' and '1899-12-30 00:04:00')
+AND				WexTrans.Date > GetDate() - 365
+AND				right('00000' + Emp.Person_Number,6) = right('00000' + WexTrans.DID,6)
+AND				rtrim(ltrim(coalesce(EMP.AREA_SUPERVISOR_NAME, ''))) <> ''
+Group BY		Emp.AREA_SUPERVISOR_NAME,
+				Emp.AREA_SUPERVISOR_NUMBER,
+				cast(WexTrans.Date as datetime) +  8 - 
+				case when datepart(dw,cast(WexTrans.Date as datetime)) = 1 Then 8 Else 
+				datepart(dw,cast(WexTrans.Date as datetime)) END 
+
+UNION ALL
+
+--SQL - Summary For More Than 10 Transactions Per Day Per Employee
+SELECT		'Over $1000 in a Day' Exception,
+			MoreThan$1000PerDay.AREA_SUPERVISOR_NUMBER Supv_Number,
+			MoreThan$1000PerDay.AREA_SUPERVISOR_NAME Supv_Name,
+			cast(MoreThan$1000PerDay.DATE as datetime) +  8 - 
+			case when datepart(dw,cast(MoreThan$1000PerDay.DATE as datetime)) = 1 Then 8 Else 
+			datepart(dw,cast(MoreThan$1000PerDay.DATE as datetime)) END WeekEndingDate,
+			COUNT(MoreThan$1000PerDay.Date) NumOfIncidents
+FROM (
+			SELECT		EMP.PERSON_NUMBER, 
+						EMP.AREA_SUPERVISOR_NUMBER,
+						EMP.AREA_SUPERVISOR_NAME,
+						WexTrans.Date
+			FROM		[EDW].[SUP_WEX_TBL_t_Transactions] WexTrans,
+						[EDW].[SUP_TS_TBL_M_Employee_Hierarchy] Emp
+			WHERE		Date > GetDate() - 365 AND right('00000' + Emp.Person_Number,6) = right('00000' + WexTrans.DID,6)
+			GROUP BY	EMP.PERSON_NUMBER, 
+						EMP.AREA_SUPERVISOR_NUMBER,
+						EMP.AREA_SUPERVISOR_NAME,
+						WexTrans.Date
+			HAVING		sum(WexTrans.Gross$) >= 1000) MoreThan$1000PerDay
+WHERE		rtrim(ltrim(coalesce(MoreThan$1000PerDay.AREA_SUPERVISOR_NAME, ''))) <> ''
+Group BY	MoreThan$1000PerDay.AREA_SUPERVISOR_NUMBER,
+			MoreThan$1000PerDay.AREA_SUPERVISOR_NAME,
+			cast(MoreThan$1000PerDay.DATE as datetime) +  8 - 
+			case when datepart(dw,cast(MoreThan$1000PerDay.DATE as datetime)) = 1 Then 8 Else 
+			datepart(dw,cast(MoreThan$1000PerDay.DATE as datetime)) END
+
+UNION ALL
+
+--SQL - Summary For Over $200 On A Single Purchase
+SELECT			'Over $200 on a Single Purchase' Exception,
+				Emp.AREA_SUPERVISOR_NUMBER Supv_Number,
+				Emp.AREA_SUPERVISOR_NAME Supv_Name,				
+				cast(WexTrans.Date as datetime) +  8 - 
+				case when datepart(dw,cast(WexTrans.Date as datetime)) = 1 Then 8 Else 
+				datepart(dw,cast(WexTrans.Date as datetime)) END WeekEndingDate,
+				Count(WexTrans.SiteSt) NumOfIncidents
+FROM			[EDW].[SUP_WEX_TBL_t_Transactions] WexTrans,
+				[EDW].[SUP_TS_TBL_M_Employee_Hierarchy] Emp
+WHERE			WexTrans.Gross$ > 200
+AND				WexTrans.Date > GetDate() - 365
+AND				right('00000' + Emp.Person_Number,6) = right('00000' + WexTrans.DID,6)
+AND				rtrim(ltrim(coalesce(EMP.AREA_SUPERVISOR_NAME, ''))) <> ''
+Group BY		Emp.AREA_SUPERVISOR_NAME,
+				Emp.AREA_SUPERVISOR_NUMBER,
+				cast(WexTrans.Date as datetime) +  8 - 
+				case when datepart(dw,cast(WexTrans.Date as datetime)) = 1 Then 8 Else 
+				datepart(dw,cast(WexTrans.Date as datetime)) END
+
+Union All
+
+--SQL - Summary For More Than 200 Gallons Per Day Per Employee
+SELECT		'More Than 200 Gallons in a Day' Exception,
+			MoreThan200GallonsPerDay.AREA_SUPERVISOR_NUMBER Supv_Number,
+			MoreThan200GallonsPerDay.AREA_SUPERVISOR_NAME Supv_Name,
+			cast(MoreThan200GallonsPerDay.DATE as datetime) +  8 - 
+			case when datepart(dw,cast(MoreThan200GallonsPerDay.DATE as datetime)) = 1 Then 8 Else 
+			datepart(dw,cast(MoreThan200GallonsPerDay.DATE as datetime)) END WeekEndingDate,
+			COUNT(MoreThan200GallonsPerDay.Date) NumOfIncidents
+FROM (
+			SELECT		EMP.PERSON_NUMBER, 
+						EMP.AREA_SUPERVISOR_NUMBER,
+						EMP.AREA_SUPERVISOR_NAME,
+						WexTrans.Date
+			FROM		[EDW].[SUP_WEX_TBL_t_Transactions] WexTrans,
+						[EDW].[SUP_TS_TBL_M_Employee_Hierarchy] Emp			
+			WHERE		Date > GetDate() - 365 AND right('00000' + Emp.Person_Number,6) = right('00000' + WexTrans.DID,6)
+			GROUP BY	EMP.PERSON_NUMBER, 
+						EMP.AREA_SUPERVISOR_NUMBER,
+						EMP.AREA_SUPERVISOR_NAME,
+						WexTrans.Date
+			HAVING		sum(WexTrans.Gallons) >= 200) MoreThan200GallonsPerDay
+WHERE		rtrim(ltrim(coalesce(MoreThan200GallonsPerDay.AREA_SUPERVISOR_NAME, ''))) <> ''
+Group BY	MoreThan200GallonsPerDay.AREA_SUPERVISOR_NUMBER,
+			MoreThan200GallonsPerDay.AREA_SUPERVISOR_NAME,
+			cast(MoreThan200GallonsPerDay.DATE as datetime) +  8 - 
+			case when datepart(dw,cast(MoreThan200GallonsPerDay.DATE as datetime)) = 1 Then 8 Else 
+			datepart(dw,cast(MoreThan200GallonsPerDay.DATE as datetime)) END
+
+UNION ALL
+
+--SQL - Summary For Non-Fuel Purchases
+SELECT			'Non-Fuel Transactions' Exception,
+				Emp.AREA_SUPERVISOR_NUMBER Supv_Number,
+				Emp.AREA_SUPERVISOR_NAME Supv_Name,
+				cast(WexTrans.Date as datetime) +  8 - 
+				case when datepart(dw,cast(WexTrans.Date as datetime)) = 1 Then 8 Else 
+				datepart(dw,cast(WexTrans.Date as datetime)) END WeekEndingDate,
+				Count(WexTrans.SiteSt) NumOfIncidents
+FROM			[EDW].[SUP_WEX_TBL_t_Transactions] WexTrans,
+				[EDW].[SUP_TS_TBL_M_Employee_Hierarchy] Emp
+WHERE			WexTrans.ProductNam not in ('DEF','DS+','DIESEL','DSL','DSL+','E85','ETHANL85','FARM','FUL OTH','JETA','PREM DSL','SALES TX','SUPALC10','SUPALC57',
+											'SUPALC77','SUPER UN','UN+ALC10','UNL PLUS','UNLALC10','UNLALC57','UNLALC77','UNLEADED','UN+','UN+ALC57','UN+ALC77',
+											'UNA','UNB','UNC','UNL','U+A','ULSD','SUP','FRM','ETH','FUL','REF','MFUL','METH')
+AND				WexTrans.Date > GetDate() - 365
+AND				right('00000' + Emp.Person_Number,6) = right('00000' + WexTrans.DID,6)
+AND				rtrim(ltrim(coalesce(EMP.AREA_SUPERVISOR_NAME, ''))) <> ''
+Group BY		Emp.AREA_SUPERVISOR_NAME,
+				Emp.AREA_SUPERVISOR_NUMBER,
+				cast(WexTrans.Date as datetime) +  8 - 
+				case when datepart(dw,cast(WexTrans.Date as datetime)) = 1 Then 8 Else 
+				datepart(dw,cast(WexTrans.Date as datetime)) END
+
+UNION ALL
+
+--SQL - Summary For Gasoline Charged To Diesel
+SELECT			'Gasoline Charged to Diesel Type Unit' Exception,
+				Emp.AREA_SUPERVISOR_NUMBER Supv_Number,
+				Emp.AREA_SUPERVISOR_NAME Supv_Name,				
+				cast(WexTrans.Date as datetime) +  8 - 
+				case when datepart(dw,cast(WexTrans.Date as datetime)) = 1 Then 8 Else 
+				datepart(dw,cast(WexTrans.Date as datetime)) END WeekEndingDate,
+				Count(WexTrans.SiteSt) NumOfIncidents
+FROM			[EDW].[SUP_WEX_TBL_t_Transactions] WexTrans,
+				[EDW].[SUP_TS_TBL_M_Employee_Hierarchy] Emp
+WHERE			WexTrans.ProductNam in ('E85','ETHANL85','SUPER UN','UN+ALC10','UNL PLUS','UNLALC10','UNLALC57','UNLALC77','UNLEADED','UN+','UN+ALC57','UN+ALC77',
+											'UNA','UNB','UNC','UNL','U+A','ULSD')
+			AND (SELECT TOP 1 VH.FUEL_TYPE_FW FROM [EDW].[SUP_FW_Vehicles] VH WHERE cast(WexTrans.Odometer as nvarchar) = VH.FUEL_NUMBER_FW) = 'DL'				 
+AND				WexTrans.Date > GetDate() - 365
+AND				right('00000' + Emp.Person_Number,6) = right('00000' + WexTrans.DID,6)
+AND				rtrim(ltrim(coalesce(EMP.AREA_SUPERVISOR_NAME, ''))) <> ''
+Group BY		Emp.AREA_SUPERVISOR_NAME,
+				Emp.AREA_SUPERVISOR_NUMBER,
+				cast(WexTrans.Date as datetime) +  8 - 
+				case when datepart(dw,cast(WexTrans.Date as datetime)) = 1 Then 8 Else 
+				datepart(dw,cast(WexTrans.Date as datetime)) END ) MainQuery
+WHERE			len(MainQuery. Supv_Number) <= 6
+--ORDER BY		Exception, Supv_Name, WeekEndingDate
+	);
+GO
+
+

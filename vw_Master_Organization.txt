@@ -1,0 +1,16 @@
+/****** Object:  View [dbo].[vw_Master_Organization]    Script Date: 05-22-2020 17:46:30 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE VIEW [dbo].[vw_Master_Organization]
+AS select distinct ORGANIZATIONINFORMATIONPEOORGANIZATIONID as OrgID
+from
+(select distinct [ORGANIZATIONINFORMATIONPEOORGINFORMATION3],ORGANIZATIONINFORMATIONPEOORGANIZATIONID,
+[ORGANIZATIONINFORMATIONPEOORGINFORMATIONCONTEXT], [EFFECTIVESTARTDATE], [EFFECTIVEENDDATE]  
+from [dbo].[EXT_hcmtopmodelanalyticsglobalam_organizationam_organizationinformationpvo] )t;
+GO
+
+

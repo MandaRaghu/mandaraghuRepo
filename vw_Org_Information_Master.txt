@@ -1,0 +1,12 @@
+/****** Object:  View [dbo].[vw_Org_Information_Master]    Script Date: 05-22-2020 17:46:13 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE VIEW [dbo].[vw_Org_Information_Master] AS SELECT distinct convert( bigint, [ORGANIZATIONINFORMATIONPEOORGANIZATIONID]) as [ORGINFORMATIONID]
+  FROM [dbo].[EXT_hcmtopmodelanalyticsglobalam_organizationam_organizationinformationpvo];
+GO
+
+

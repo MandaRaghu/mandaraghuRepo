@@ -1,0 +1,308 @@
+/****** Object:  StoredProcedure [DW].[pDate]    Script Date: 05-22-2020 18:01:05 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE PROC [DW].[pDate] @ErrorBln [TINYINT],@ETLActivityName [VARCHAR](500),@ETLPipelineID [VARCHAR](500),@ETLPipelineName [VARCHAR](500),@ETLWindowStart [DATETIME],@ETLWindowEnd [DATETIME],@FromRowNumber [BIGINT],@ToRowNumber [BIGINT],@SourceTable [VARCHAR](50),@ProcedureName [VARCHAR](50) AS
+
+--v1.01 20180507 MSF - Initial creation
+--V1.02 20180605 KWS - Add Date Column, Use ETLWIndow Times as Start, End Date
+--V1.03 20180709 MSF - Commented out code that deletes from dimension during cleanup and removed recursive insert in error handling since it requires a source table
+--                     Also updated @EndDate so that it is a month prior to @ETLWindowEnd in case we have a timing issue with the dates (mainly for FactTimesheet since
+--                     the WorkDates are for the week prior - so on the first ETL run we would end up with unknown FactTimesheet dates).
+
+--SELECT @ETLActivityName = 'TransformLoadDimDate', @ETLPipeLineID = '1', @ETLPipelineName = 'DimDatePipeline', @ETLWindowStart = '2018-04-26', @ETLWIndowEnd = '2018-04-27'
+
+DECLARE @RowsInserted BIGINT;
+DECLARE @RowsUpdated BIGINT;
+DECLARE @ETLErrorBatchNumberBI BIGINT;
+DECLARE @BatchCount BIGINT;
+DECLARE @ETLRunDate DATETIME	= GETUTCDATE();
+DECLARE @StartDate AS DATETIME	= DATEADD(MONTH,-1,CONVERT(DATE,@ETLWindowStart))	--DATEADD(YEAR,-1,CAST(@ETLWindowStart AS DATE)); --One year in the past
+DECLARE @EndDate AS DATETIME	= CONVERT(DATE,@ETLWindowEnd)						--DATEADD(YEAR,2,CAST(@ETLWindowStart AS DATE)); --Two years in the future
+
+BEGIN TRY
+
+	--------------------------------
+	-- CLEANUP PREVIOUS EXECUTION --
+	--------------------------------
+	
+	--Do not delete anything from DW tables
+	--DELETE FROM DW.[Date]
+	--WHERE ETLWindowStart = @ETLWindowStart 
+	--AND ETLWindowEnd = @ETLWindowEnd
+	--OPTION (LABEL = 'Stage.pDate: Delete existing records for pipeline instance') 
+
+	--------------------
+	-- LOAD DIMENSION --
+	--------------------
+
+	--Generate dates that range from @StartDate to @EndDate
+	INSERT INTO DW.[Date]
+	(
+		DateSK
+	  , [Date]
+	  , DateName
+	  , DateDescription
+	  --YEAR--
+	  , YearName
+	  --SEMESTER--
+	  --, Semester
+	  --, SemesterName
+	  --, SemesterInYear
+	  --QUARTER--
+	  , QuarterName
+	  --, QuarterInSemester
+	  , QuarterInYear
+	  , QuarterAndYear
+	  , QuarterAndYearSort
+	  --MONTH--
+	  , MonthName
+	  , MonthNameAbbr
+	  , MonthInQuarter
+	  --, MonthInSemester
+	  , MonthInYear
+	  , MonthAndYear
+	  , MonthAndYearSort
+	  , MonthAndYearSortForDisplay
+	  , MonthAndYearAbbr
+	  --WEEK--
+	  , WeekName
+	  , WeekInMonth
+	  , WeekInQuarter
+	  --, WeekInSemester
+	  , WeekInYear
+	  , WeekAndYear
+	  , WeekAndYearSort
+	  --DAY--
+	  , DayName
+	  , DayNameAbbr
+	  --, DayNameLong
+	  , DayInWeek
+	  , DayInMonth
+	  , DayInQuarter
+	  --, DayInSemester
+	  , DayInYear
+	  --FLAGS--
+	  , IsHoliday
+	  , IsWeekday
+	  , IsWorkDay
+	  , IsLastDayInWeek
+	  , IsLastDayInMonth
+	  , IsLastDayInQuarter
+	  --, IsLastDayInSemester
+	  , IsLastDayInYear
+	  --ROLLING FLAGS--
+	  , IsToday
+	  , IsYesterday
+	  --, IsCurrentWeek				--Need to develop logic for this field
+	  --, IsCurrentWeekLastYear		--Need to develop logic for this field
+	  --, IsLastWeek					--Need to develop logic for this field
+	  , IsCurrentMonth
+	  , IsCurrentMonthLastYear
+	  --, IsLastMonth					--Need to develop logic for this field
+	  , IsCurrentQuarter
+	  , IsCurrentQuarterLastYear
+	  --, IsLastQuarter				--Need to develop logic for this field
+	  , IsCurrentYear
+	  , IsLastYear
+	  , IsRolling13Months
+	  --FISCAL--
+	  --, FiscalMonthName
+	  --, FiscalMonthInYear
+	  --, FiscalMonthAndYear  
+	  --, FiscalQuarterName
+	  --, FiscalQuarterInYear
+	  --, FiscalQuarterAndYear
+	  --, FiscalYearName
+	  --ETL METADATA--
+	  , ETLPipelineID
+	  , ETLActivityName
+	  , ETLInsertDate
+	  , ETLModifyDate
+	  , ETLWindowStart
+	  , ETLWindowEnd
+	  , ETLErrorRowID
+	)
+	SELECT
+		CONVERT(VARCHAR(8), DATEADD(DAY,N.Nbr,@StartDate), 112) --DateSK AS 'YYYYMMDD'
+	  , DATEADD(DAY,N.Nbr,@StartDate) AS [Date]
+	  , CONVERT(VARCHAR(10),DATEADD(DAY,N.Nbr,@StartDate),101) --DateName
+	  , NULL --DateDescription
+	  --YEAR--
+	  , DATEPART(YYYY, DATEADD(DAY,N.Nbr,@StartDate)) --YearName
+	  --SEMESTER--
+	  --, CAST('H' + CAST((DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) - 1) / 6 + 1 AS CHAR(1)) AS CHAR(2)) --SemesterName
+	  --, (DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) - 1) / 6 + 1 --SemesterInYear
+	  --, CAST('H' + CAST((DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) - 1) / 6 + 1 AS CHAR(1)) AS CHAR(2)) + ' ' + DATENAME(YYYY, DATEADD(DAY,N.Nbr,@StartDate)) --SemesterAndYear
+	  --QUARTER--
+	  , 'Q' + CAST((DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) - 1) / 3 + 1 AS VARCHAR(2)) --QuarterName
+	  --, ((DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) - 1) / 3) % 2 + 1 --QuarterInSemester
+	  , (DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) - 1) / 3 + 1 --QuarterInYear
+	  , 'Q' + CAST((DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) - 1) / 3 + 1 AS VARCHAR(2)) + ' ' + DATENAME(YYYY, DATEADD(DAY,N.Nbr,@StartDate)) --QuarterAndYear
+      , CAST(DATEPART(YYYY, DATEADD(DAY,N.Nbr,@StartDate)) + RIGHT('0'+CAST((DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) - 1) / 3 + 1 AS VARCHAR(2)),2) AS INT) --QuarterAndYearSort
+	  --MONTH--
+	  , DATENAME(MM, DATEADD(DAY,N.Nbr,@StartDate)) --MonthName
+	  , UPPER(LEFT(LTRIM(DATENAME(MM, DATEADD(DAY,N.Nbr,@StartDate))), 3)) --MonthNameAbbr
+	  , (DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) - 1) % 3 + 1 --MonthInQuarter
+	  --, (DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) - 1) % 6 + 1 --MonthInSemester
+	  , DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) --MonthInYear
+	  , DATENAME(MM, DATEADD(DAY,N.Nbr,@StartDate)) + ' ' + DATENAME(YYYY, DATEADD(DAY,N.Nbr,@StartDate)) --MonthAndYear
+      , CAST(DATEPART(YYYY, DATEADD(DAY,N.Nbr,@StartDate))+ RIGHT('0'+CAST(DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) AS VARCHAR(2)),2) AS INT) --MonthAndYearSort
+	  , CAST(DATEPART(YYYY, DATEADD(DAY,N.Nbr,@StartDate)) AS CHAR(4)) + '/' + RIGHT('0' + CAST(DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) AS VARCHAR(2)),2) --MonthAndYearSortForDisplay
+	  , UPPER(LEFT(LTRIM(DATENAME(MM, DATEADD(DAY,N.Nbr,@StartDate))), 3)) + ' ' + DATENAME(YYYY, DATEADD(DAY,N.Nbr,@StartDate)) --MonthAndYearAbbr
+	  --WEEK--
+	  , 'W' + CONVERT(VARCHAR(20), DATEPART(WK, DATEADD(DAY,N.Nbr,@StartDate))) --WeekName
+	  , DATEPART(WK, DATEADD(DAY,N.Nbr,@StartDate)) - DATEPART(WK, CONVERT(DATETIME, CAST(DATEPART(YYYY, DATEADD(DAY,N.Nbr,@StartDate)) AS CHAR(4)) + RIGHT(LEFT(CONVERT(CHAR(10), DATEADD(DAY,N.Nbr,@StartDate), 112), 6), 2) + '01', 101)) + 1 --WeekInMonth
+	  , DATEPART(WK, DATEADD(DAY,N.Nbr,@StartDate)) - DATEPART(WK, CONVERT(DATETIME, CAST((((DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) - 1) / 3 + 1)- 1) * 3 + 1 AS VARCHAR(2)) + '/01/' + CAST(DATEPART(YYYY, DATEADD(DAY,N.Nbr,@StartDate)) AS CHAR(4)), 101)) + 1 --WeekInQuarter
+	  --, DATEPART(WK, DATEADD(DAY,N.Nbr,@StartDate)) - DATEPART(WK, CONVERT(DATETIME, CAST((((DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) - 1) / 6 + 1)- 1) * 6 + 1 AS VARCHAR(2)) + '/01/' + CAST(DATEPART(YYYY, DATEADD(DAY,N.Nbr,@StartDate)) AS CHAR(4)), 101)) + 1 --WeekInSemester
+	  , DATEPART(WK, DATEADD(DAY,N.Nbr,@StartDate)) --WeekInYear
+	  , 'W' + CONVERT(VARCHAR(20), DATEPART(WK, DATEADD(DAY,N.Nbr,@StartDate))) + ' ' + DATENAME(YYYY, DATEADD(DAY,N.Nbr,@StartDate)) --WeekAndYear
+	  ,  CAST(DATEPART(YYYY, DATEADD(DAY,N.Nbr,@StartDate))+ RIGHT('0'+CAST(DATEPART(WK, DATEADD(DAY,N.Nbr,@StartDate)) AS VARCHAR(2)),2) AS INT) --WeekAndYearSort
+	  --DAY--
+	  , DATENAME(WEEKDAY, DATEADD(DAY,N.Nbr,@StartDate)) --DayName
+	  , UPPER(LEFT(LTRIM(DATENAME(WEEKDAY, DATEADD(DAY,N.Nbr,@StartDate))), 3)) --DayNameAbbr
+	  --, DATENAME(WEEKDAY, DATEADD(DAY,N.Nbr,@StartDate)) + ', ' + DATENAME(MONTH, DATEADD(DAY,N.Nbr,@StartDate)) + ' ' + CAST(DATEPART(DD, DATEADD(DAY,N.Nbr,@StartDate)) AS VARCHAR(2)) + ', ' + CAST(DATEPART(YYYY, DATEADD(DAY,N.Nbr,@StartDate)) AS CHAR(4)) --DayNameLong
+	  , DATEPART(WEEKDAY, DATEADD(DAY,N.Nbr,@StartDate)) --DayInWeek
+	  , DATEPART(DD, DATEADD(DAY,N.Nbr,@StartDate)) --DayInMonth
+	  , DATEDIFF(DD, CONVERT(DATETIME, CAST((((DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) - 1) / 3 + 1) - 1) * 3 + 1 AS VARCHAR(2)) + '/01/' + CAST(DATEPART(YYYY, DATEADD(DAY,N.Nbr,@StartDate)) AS CHAR(4)), 101), DATEADD(DAY,N.Nbr,@StartDate)) + 1 --DayInQuarter
+	  --, DATEDIFF(DD, CONVERT(DATETIME, CAST((((DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) - 1) / 6 + 1) - 1) * 6 + 1 AS VARCHAR(2)) + '/01/' + CAST(DATEPART(YYYY, DATEADD(DAY,N.Nbr,@StartDate)) AS CHAR(4)), 101), DATEADD(DAY,N.Nbr,@StartDate)) + 1 --DayInSemester
+	  , DATEDIFF(DD, CONVERT(DATETIME, CAST(DATEPART(YYYY, DATEADD(DAY,N.Nbr,@StartDate)) AS CHAR(4)) + '0101', 101), DATEADD(DAY,N.Nbr,@StartDate)) + 1 --DayInYear
+	  --FLAGS--
+	  , 'N' --IsHoliday
+	  , CASE WHEN DATEPART(WEEKDAY, DATEADD(DAY,N.Nbr,@StartDate)) IN (1, 7) THEN 'N' ELSE 'Y' END --IsWeekday
+	  , CASE WHEN DATEPART(WEEKDAY, DATEADD(DAY,N.Nbr,@StartDate)) IN (1, 7) THEN 'N' ELSE 'Y' END --IsWorkDay
+	  , CASE WHEN DATEPART(WEEKDAY, DATEADD(DAY,N.Nbr,@StartDate)) = 7 THEN 'Y' ELSE 'N' END --IsLastDayOfWeek
+	  , CASE WHEN SIGN(DATEPART(D, GETDATE()) - DAY(DATEADD(D, - DAY(DATEADD(M, 1, GETDATE())), DATEADD(M, 1, GETDATE())))) + 1 = 1 THEN 'Y' ELSE 'N' END --IsLastDayInMonth
+	  , CASE WHEN SIGN(DATEDIFF(DD, DATEADD(QQ, DATEDIFF(QQ, -1, GETDATE()), -1), GETDATE())) + 1 = 1 THEN 'Y' ELSE 'N' END --IsLastDayInQuarter
+	  --, CASE WHEN SIGN(DATEDIFF(DD, DATEADD(DD, -1, DATEADD(MM, 1, CONVERT(DATETIME, CAST((((DATEPART(MM, GETDATE()) - 1) / 6 + 1) - 1)*6 + 6 AS VARCHAR(2)) + '/' + '01' + '/' + CAST(DATEPART(YYYY, GETDATE()) AS CHAR(4)), 101))), GETDATE())) + 1 = 1 THEN 'Y' ELSE 'N' END --IsLastDayInSemester
+	  , CASE WHEN SIGN(DATEDIFF(DD, DATEADD(DD, -1,DATEADD(YY, DATEDIFF(YY, 0, GETDATE()) + 1, 0)), GETDATE())) + 1 = 1 THEN 'Y' ELSE 'N' END --IsLastDayInYear
+	  , 'N' --IsToday
+	  , 'N' --IsYesterday
+	  --, 'N' --IsCurrentWeek				--Need to develop logic for this field
+	  --, 'N' --IsCurrentWeekLastYear		--Need to develop logic for this field
+	  --, 'N' --IsLastWeek				--Need to develop logic for this field
+	  , 'N' --IsCurrentMonth
+	  , 'N' --IsCurrentMonthLastYear
+	  --, 'N' --IsLastMonth				--Need to develop logic for this field
+	  , 'N' --IsCurrentQuarter
+	  , 'N' --IsCurrentQuarterLastYear
+	  --, 'N' --IsLastQuarter				--Need to develop logic for this field
+	  , 'N' --IsCurrentYear
+	  , 'N' --IsLastYear
+	  , 'N' --IsRolling13Months
+	  --FISCAL--
+	  --, CASE WHEN DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) < 7 THEN 'M' + CAST(DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) + 6 AS VARCHAR) ELSE 'M' + CAST(DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) - 6 AS VARCHAR) END --FiscalMonthName  
+	  --, CASE WHEN DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) < 7 THEN DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) + 6 ELSE DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) - 6 END --FiscalMonthInYear  
+	  --, CASE WHEN DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) < 7 THEN RIGHT('0' + CAST(DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate))  + 6 AS VARCHAR), 2) + ' FY' + CAST(DATEPART(YYYY, DATEADD(DAY,N.Nbr,@StartDate)) - 1 AS VARCHAR) ELSE RIGHT('0' + CAST(DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) - 6 AS VARCHAR), 2) + ' FY' + CAST(DATEPART(YYYY, DATEADD(DAY,N.Nbr,@StartDate)) AS VARCHAR) END --FiscalMonthAndYear
+	  --, CASE WHEN DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) < 7 THEN 'Q' + CAST(DATEPART(Q, DATEADD(DAY,N.Nbr,@StartDate)) + 2 AS VARCHAR) ELSE 'Q' + CAST(DATEPART(Q, DATEADD(DAY,N.Nbr,@StartDate)) - 2 AS VARCHAR) END --FiscalQuarterName 
+	  --, CASE WHEN DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) < 7 THEN DATEPART(Q, DATEADD(DAY,N.Nbr,@StartDate)) + 2 ELSE DATEPART(Q, DATEADD(DAY,N.Nbr,@StartDate)) - 2 END --FiscalQuarterInYear 
+	  --, CASE WHEN DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) < 7 THEN 'Q' + CAST(DATEPART(Q, DATEADD(DAY,N.Nbr,@StartDate)) + 2 AS VARCHAR) + ' FY' + CAST(DATEPART(YYYY, DATEADD(DAY,N.Nbr,@StartDate)) - 1 AS VARCHAR) ELSE 'Q' + CAST(DATEPART(Q, DATEADD(DAY,N.Nbr,@StartDate)) - 2 AS VARCHAR) + ' FY' + CAST(DATEPART(YYYY, DATEADD(DAY,N.Nbr,@StartDate)) AS VARCHAR) END --FiscalQuarterAndYear 
+	  --, CASE WHEN DATEPART(MM, DATEADD(DAY,N.Nbr,@StartDate)) < 7 THEN 'FY' + CAST(DATEPART(YYYY, DATEADD(DAY,N.Nbr,@StartDate)) - 1 AS VARCHAR) ELSE 'FY' + CAST(DATEPART(YYYY, DATEADD(DAY,N.Nbr,@StartDate)) AS VARCHAR) END --FiscalYearName 
+	  --ETL METADATA--
+	  , @ETLPipelineID
+	  , @ETLActivityName
+	  , @ETLRunDate
+	  , @ETLRunDate
+	  , @ETLWindowStart
+	  , @ETLWindowEnd
+	  , NULL
+	FROM DW.vNumbers AS N
+	LEFT JOIN DW.[Date] AS D
+	ON CONVERT(VARCHAR(8),DATEADD(DAY,N.Nbr,@StartDate),112) = D.DateSK	
+	WHERE DATEADD(DAY,N.Nbr,@StartDate) BETWEEN @StartDate AND @EndDate
+	AND D.DateSK IS NULL --Do not insert rows that already exists
+	OPTION (LABEL = 'DW.pDate: Insert records') 
+
+	--Update records to mark US holidays
+	UPDATE DW.[Date] SET IsHoliday = 'Y', IsWorkDay = 'N', DateDescription = 'New Year''s Day' WHERE DateSK NOT IN ('19000101','20991231') AND DayInMonth = 1 AND MonthInYear = 1;
+	UPDATE DW.[Date] SET IsHoliday = 'Y', IsWorkDay = 'N', DateDescription = 'Independence Day' WHERE DateSK NOT IN ('19000101','20991231') AND DayInMonth = 4 AND MonthInYear = 7; 
+	UPDATE DW.[Date] SET IsHoliday = 'Y', IsWorkDay = 'N', DateDescription = 'Veteran''s Day' WHERE DateSK NOT IN ('19000101','20991231') AND DayInMonth = 11 AND MonthInYear = 11;
+	UPDATE DW.[Date] SET IsHoliday = 'Y', IsWorkDay = 'N', DateDescription = 'Christmas Day' WHERE DateSK NOT IN ('19000101','20991231') AND DayInMonth = 25 AND MonthInYear = 12;
+	UPDATE DW.[Date] SET IsHoliday = 'Y', IsWorkDay = 'N', DateDescription = 'Martin Luther King Jr Birthday' WHERE DateSK NOT IN ('19000101','20991231') AND MonthInYear = 1 AND DateName = DATEADD(WK, DATEDIFF(WK,0,DATEADD(DD,20-DATEPART(DAY, DateName), DateName)), 0); 
+	UPDATE DW.[Date] SET IsHoliday = 'Y', IsWorkDay = 'N', DateDescription = 'President''s Day' WHERE DateSK NOT IN ('19000101','20991231') AND MonthInYear = 2 AND DateName = DATEADD(WK, DATEDIFF(WK,0,DATEADD(DD,20-DATEPART(DAY, DateName), DateName)), 0); 
+	UPDATE DW.[Date] SET IsHoliday = 'Y', IsWorkDay = 'N', DateDescription = 'Memorial Day' WHERE DateSK NOT IN ('19000101','20991231') AND MonthInYear = 5 AND DateName = DATEADD(WK, DATEDIFF(WK,0,DATEADD(DD,30-DATEPART(DAY, DateName), DateName)), 0); 
+	UPDATE DW.[Date] SET IsHoliday = 'Y', IsWorkDay = 'N', DateDescription = 'Labor Day' WHERE DateSK NOT IN ('19000101','20991231') AND MonthInYear = 9 AND DateName = DATEADD(WK, DATEDIFF(WK,0,DATEADD(DD,6-DATEPART(DAY, DateName), DateName)), 0);
+	UPDATE DW.[Date] SET IsHoliday = 'Y', IsWorkDay = 'N', DateDescription = 'Columbus Day' WHERE DateSK NOT IN ('19000101','20991231') AND MonthInYear = 10 AND DateName = DATEADD(WK, DATEDIFF(WK,0,DATEADD(DD,13-DATEPART(DAY, DateName), DateName)), 0);
+	UPDATE DW.[Date] SET IsHoliday = 'Y', IsWorkDay = 'N', DateDescription = 'Thanksgiving Day' WHERE DateSK NOT IN ('19000101','20991231') AND MonthInYear = 11 AND DateName = DATEADD(WK, DATEDIFF(WK,0,DATEADD(DD,28-DATEPART(DAY, DateName), DateName)), -4);
+
+	--Update rolling flags (IMPORTANT! Must either run this procedure daily, or create a view with the logic below)
+	UPDATE DW.[Date] SET IsToday					= CASE WHEN DateName = CONVERT(VARCHAR(10),GETDATE(),101) THEN 'Y' ELSE 'N' END WHERE DateSK NOT IN ('19000101','20991231');
+	UPDATE DW.[Date] SET IsToday					= CASE WHEN DateName = CONVERT(VARCHAR(10),GETDATE()-1,101) THEN 'Y' ELSE 'N' END WHERE DateSK NOT IN ('19000101','20991231');
+	UPDATE DW.[Date] SET IsCurrentMonth				= CASE WHEN DateSK BETWEEN CAST(DATEADD(M,-1,CAST(MONTH(GETDATE()) AS VARCHAR) + '/1/' + CAST(YEAR(GETDATE()) AS VARCHAR)) AS DATE) AND CAST(DATEADD(D,-1,CAST(MONTH(GETDATE()) AS VARCHAR) + '/1/' + CAST(YEAR(GETDATE()) AS VARCHAR)) AS DATE) THEN 'Y' ELSE 'N' END WHERE DateSK NOT IN ('19000101','20991231'); --Last completed month
+	UPDATE DW.[Date] SET IsCurrentMonthLastYear		= CASE WHEN MonthInYear = DATEPART(MM, GETDATE()) AND YearName = DATEPART(YYYY, GETDATE()) -1 THEN 'Y' ELSE 'N' END WHERE DateSK NOT IN ('19000101','20991231');
+	UPDATE DW.[Date] SET IsCurrentQuarterLastYear	= CASE WHEN QuarterInYear = DATEPART(qq,GETDATE()) AND YearName = DATEPART(YYYY, GETDATE())-1 THEN 'Y' ELSE 'N' END WHERE DateSK NOT IN ('19000101','20991231');
+	UPDATE DW.[Date] SET IsCurrentYear				= CASE WHEN YearName = DATEPART(YYYY, GETDATE()) THEN 'Y' ELSE 'N' END WHERE DateSK NOT IN ('19000101','20991231');
+	UPDATE DW.[Date] SET IsLastYear					= CASE WHEN YearName = DATEPART(YYYY, GETDATE())-1 THEN 'Y' ELSE 'N' END WHERE DateSK NOT IN ('19000101','20991231');
+	UPDATE DW.[Date] SET IsRolling13Months			= CASE WHEN DateSK  BETWEEN CAST(DATEADD(M,-13,CAST(MONTH(GETDATE()) AS VARCHAR) + '/1/' + CAST(YEAR(GETDATE()) AS VARCHAR)) AS DATE) AND CAST(DATEADD(D,-1,CAST(MONTH(GETDATE()) AS VARCHAR) + '/1/' + CAST(YEAR(GETDATE()) AS VARCHAR)) AS DATE) THEN 'Y' ELSE 'N' END WHERE DateSK NOT IN ('19000101','20991231');
+	--UPDATE DW.[Date] SET IsCurrentWeek			= CASE WHEN ??? = ??? THEN 'Y' ELSE 'N' END WHERE DateSK NOT IN ('19000101','20991231'); --Need to develop logic for this field
+	--UPDATE DW.[Date] SET IsCurrentWeekLastYear	= CASE WHEN ??? = ??? THEN 'Y' ELSE 'N' END WHERE DateSK NOT IN ('19000101','20991231'); --Need to develop logic for this field
+	--UPDATE DW.[Date] SET IsLastWeek				= CASE WHEN ??? = ??? THEN 'Y' ELSE 'N' END WHERE DateSK NOT IN ('19000101','20991231'); --Need to develop logic for this field
+	--UPDATE DW.[Date] SET IsLastMonth				= CASE WHEN ??? = ??? THEN 'Y' ELSE 'N' END WHERE DateSK NOT IN ('19000101','20991231'); --Need to develop logic for this field
+	--UPDATE DW.[Date] SET IsLastQuarter			= CASE WHEN ??? = ??? THEN 'Y' ELSE 'N' END WHERE DateSK NOT IN ('19000101','20991231'); --Need to develop logic for this field
+
+END TRY
+
+BEGIN CATCH
+
+	PRINT 'Error Handling'
+
+	DECLARE @ErrorMessage NVARCHAR(4000) = ERROR_MESSAGE();  
+	DECLARE @ErrorNumber INT = ERROR_NUMBER(); 
+	DECLARE @ErrorSeverity INT = ISNULL(ERROR_SEVERITY(),16);  
+	DECLARE @ErrorState INT = ERROR_STATE();   
+	DECLARE @ErrorDateTime DATETIME = GETUTCDATE();  
+
+	SELECT @BatchCount = 0
+	--SELECT @BatchCount = COUNT(*) 
+	--FROM DW.[Date] --Incorrect: needs to be a source table not a destination table
+	--WHERE ETLPipelineID = @ETLPipelineID
+	--AND COALESCE(ETLErrorRowID,-1) BETWEEN COALESCE(@FromRowNumber,-1) AND COALESCE(@ToRowNumber,-1)
+
+	INSERT INTO ETL.ErrorDetail
+	(
+		ErrorDetailID
+	  , ETLPipelineID
+	  , ETLActivityName
+	  , FromRowNumber
+	  , ToRowNumber
+	  , ErrorNumber
+	  , ErrorSeverity
+	  , ErrorState
+	  , ErrorMessage
+	  , ErrorDatetime
+	  , IsReviewed
+	  , IsErrorRecord
+	)
+	SELECT  
+		ErrorDetailID	= NEWID()
+	  , PipeLineID		= @ETLPipelineId
+	  , ETLActivityName	= @ETLActivityName
+	  , FromRowNumber	= COALESCE(@FromRowNumber,1)
+	  , ToRowNumber		= COALESCE(@ToRowNumber,@BatchCount) 
+	  , ErrorNumber		= @ErrorNumber
+	  , ErrorSeverity	= @ErrorSeverity 
+	  , ErrorState		= @ErrorState
+	  , ErrorMessage	= @ErrorMessage
+	  , ErrorDatetime	= @ErrorDateTime
+	  , IsReviewed		= CASE WHEN @BatchCount = 1 THEN 1 ELSE 0 END
+	  , IsErrorRecord	= CASE WHEN @BatchCount = 1 THEN 1 ELSE 0 END
+	OPTION (LABEL = 'Stage.pDate: Insert records to ETL.ErrorDetail')
+
+	RAISERROR (@ErrorMessage,@ErrorSeverity,@ErrorState);
+
+	
+	IF (SELECT COUNT(*) FROM ETL.ActivityInstance WHERE ETLPipelineID = @ETLPipelineID AND ETLActivityName = @ETLActivityName AND ETLErrorStatus = 'In Progress') = 0
+	BEGIN
+		PRINT 'Launch Error'
+		EXEC ETL.pActivityUpdate @ETLPipelineID, @ETLActivityName, NULL, NULL, 0, NULL
+		--Disabling recursive insert since it requires a source table and DimDate doesn't have a source table
+		--EXEC ETL.pErrorBatchLoad @ETLWindowStart, @ETLWindowEnd, @SourceTable, @ProcedureName, @ETLPipelineID, @ETLActivityName 
+	END
+
+END CATCH
+GO
+
+

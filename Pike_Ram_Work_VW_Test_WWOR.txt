@@ -1,0 +1,60 @@
+/****** Object:  View [dbo].[VW_Test_WWOR]    Script Date: 05-22-2020 18:13:40 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE VIEW [dbo].[VW_Test_WWOR] AS select PROJECT_NUMBER_DFF, sum(PROD_LABOR_HOURS) Total_Prod_Hours
+
+ from
+ (
+ 
+ select 	[DESC_CUSTOMER_] Customer,
+	ClassCode.[CLASSCODE] as CLASS_CODE,
+	projdff.[PROJECT_NUMBER_] PROJECT_NUMBER_DFF,
+	TASK.[TASKSTRUCTUREBASEPEOELEMENTNUMBER] as Workorder ,
+	case when ([EXPENDITURETYPEEXPENDITURETYPENAME] IN('Billable Contract Labor - Doubletime','Billable Contract Labor - Overtime','Billable Contract Labor - Regular','Productive Labor - Doubletime','Productive Labor - Overtime','Productive Labor - Regular'))
+	Then sum(case when (pcd.[PROJECTCOSTDISTRIBUTIONPEOQUANTITY] like '%E%') then 0 else
+		convert(numeric(25,2),pcd.[PROJECTCOSTDISTRIBUTIONPEOQUANTITY]) end)
+	else 0 end as PROD_LABOR_HOURS
+	
+
+	from 
+	(select distinct  [S_K_5000],[PROJECT_NUMBER_],[DESC_CUSTOMER_] from [dbo].[temp_EXT_fscmtopmodelam_pjf_projects_allbiam_flex_bi_pjf_projects_all_vi]) projdff  ,
+	(Select distinct [CLASSCODEID],[CLASSCODE] from  temp_EXT_fscmtopmodelam_pjfsetupprojectsam_classcodetranslation) ClassCode,
+	(select distinct [PROJELEMENTID],[TASKSTRUCTURETRANSLATIONPEONAME], [PROJECTBASEPEOPROJECTID],[TASKSTRUCTUREBASEPEOELEMENTNUMBER],[TASKSTRUCTUREBASEPEOCHARGEABLEFLAG], [TASKSTRUCTUREBASEPEOBILLABLEFLAG],[TASKSTRUCTUREBASEPEOPLANNINGENDDATE]  from [dbo].[temp_EXT_fscmtopmodelam_pjfprojectdefinitionam_taskpvo]) task,
+	(Select distinct  [EXPENDITURETYPEEXPENDITURECATEGORYID],[EXPENDITURETYPEID],[EXPENDITURETYPEEXPENDITURETYPENAME] from [dbo].[temp_EXT_fscmtopmodelam_pjfsetuptransactionsam_expendituretypeview] ) exptype, 
+	(select distinct  [PROJECTBASEPEOSEGMENT1],[PROJECTCODESPEOTEXTATTR10], [PROJECTCODESPEOTEXTATTR12], [PROJECTID],[PROJECTCODESPEOTEXTATTR03], [PROJECTCODESPEOTEXTATTR11] from [dbo].[temp_EXT_fscmtopmodelam_pjfprojectam_project]) proj,
+	(Select distinct [EXPENDITUREITEMID],[EXPENDITUREITEMPEOEXPENDITURETYPEID] from [dbo].[temp_EXT_fscmtopmodelam_pjctransactionsam_expenditureitempvo]) expitem,                                                                                     
+	(select distinct [PJFPROJECTCLASSESPROJECTID], [PJFPROJECTCLASSESCLASSCATEGORYID],[PJFPROJECTCLASSESCLASSCODEID] from [dbo].[temp_EXT_fscmtopmodelam_pjfsetupprojectsam_projectclass] )projclass,                                                                                        
+	(Select distinct [CLASSCATEGORYID],[CLASSCATEGORY] from [dbo].[temp_EXT_fscmtopmodelam_pjfsetupprojectsam_classcategorytranslation] ) classcat,                                                                                   
+	(Select distinct [EXPENDITURECATEGORYID],[EXPENDITURECATEGORYNAME]  from temp_EXT_fscmtopmodelam_pjfsetuptransactionsam_expenditurecategorytranslation) ExpCategory,
+	(select  distinct [EXPENDITUREITEMID],[EXPENDITUREITEMPEOPARENTLINENUMBER], [PROJECTCOSTDISTRIBUTIONPEOPROJECTID], [PROJECTCOSTDISTRIBUTIONPEOTASKID], [PROJECTCOSTDISTRIBUTIONPEOPRVDRGLDATE],[PROJECTCOSTDISTRIBUTIONPEOORGID], [PROJECTCOSTDISTRIBUTIONPEOQUANTITY],[PROJECTCOSTDISTRIBUTIONPEOPROJFUNCBURDENEDCOST]  from   [dbo].[temp_EXT_Fscmtopmodelam_pjctransactionsam_projectcostdistributionpvo]) pcd
+	where 
+	pcd.Projectcostdistributionpeoprojectid=proj.[PROJECTID]   
+	and projdff.[S_K_5000] =proj.[PROJECTID]                                                                                                                                                                                                                                                        
+	and exptype.expendituretypeid=expitem.expenditureitempeoexpendituretypeid                                                                                     
+	and expitem.expenditureitemid=pcd.expenditureitemid                                                                                      
+	and projclass.[PJFPROJECTCLASSESPROJECTID]=proj.[PROJECTID]                                                                                     
+	and projclass.[PJFPROJECTCLASSESCLASSCATEGORYID]=classcat.[CLASSCATEGORYID]                                                                                   
+	and classcat.[CLASSCATEGORY]='Line of Business'                                                                                   
+	and task.[PROJELEMENTID]=pcd.[projectcostdistributionpeotaskid]                                                                                        
+	and task.[PROJECTBASEPEOPROJECTID]=pcd.Projectcostdistributionpeoprojectid                                                                                    
+	and task.[PROJECTBASEPEOPROJECTID]=proj.[PROJECTID]                                                                                      
+	AND projclass.[PJFPROJECTCLASSESCLASSCODEID] =ClassCode.[CLASSCODEID]
+	AND expCategory.[EXPENDITURECATEGORYID]=exptype.[EXPENDITURETYPEEXPENDITURECATEGORYID]
+	AND [DESC_CUSTOMER_]='DUKE ENERGY'
+	group by ClassCode.[CLASSCODE],
+	TASK.[TASKSTRUCTUREBASEPEOELEMENTNUMBER] ,
+	projdff.[PROJECT_NUMBER_],
+	[DESC_CUSTOMER_],
+	[EXPENDITURETYPEEXPENDITURETYPENAME]
+
+
+	) a
+
+	group by PROJECT_NUMBER_DFF;
+GO
+
+

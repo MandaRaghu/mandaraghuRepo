@@ -1,0 +1,544 @@
+/****** Object:  StoredProcedure [DW].[pFactTimesheet]    Script Date: 05-22-2020 18:20:33 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE PROC [DW].[pFactTimesheet] @ErrorBln [TINYINT],@ETLActivityName [VARCHAR](500),@ETLPipelineID [VARCHAR](500),@ETLPipelineName [VARCHAR](500),@ETLWindowStart [DATETIME],@ETLWindowEnd [DATETIME],@FromRowNumber [BIGINT],@ToRowNumber [BIGINT],@SourceTable [VARCHAR](50),@ProcedureName [VARCHAR](50) AS
+
+--V1.00 20180511 MSF - Initial creation
+--V1.01 20180516 KWS - Pivot WorkHours, add Business Key for late arriving Dim, do not load 0 hour days
+--V1.02 20180518 MSF - Added CustomerSK
+--V1.03 20180601 MSF - Added code to assign JobSK to the job that contained the most hours logged per asset per day and logic to update FactActivitySummary
+--V1.04 20180614 KWS - Do lookup in Work.AssetYard as Type2 SCD
+--V1.05 20180615 KWS - Fix lookup in Work.AssetYard ( was returning multiple rows)
+--V1.06 20180619 MSF - Fix logic for CrewLeaderAssetsNotInSameYard flag
+--V1.07 20180712 MSF - Commented out code that deletes from fact during cleanup, set @BatchCount to be based on source table (not destination table), 
+--                     disabled invocation of the recursive insert due to complexity of FactTimesheet (for error handling), added "late arriving" logic
+--                     to update YardSK in FactDelayEvent and FactDailyActivity due to the timing issue of Timesheet data arringing only once a week 
+--V1.08 20180717 KWS - Commented out "AND FactActivitySummary.ETLModifyDate = @ETLRunDate in the Update of FactActivitySummary"
+--V1.09 20180719 KWS - Add code to Update JobSK in FactActivitySummary
+--v1.10 20180724 KWS - Fix Issues with Flags - Note : Delete from Fact During Cleanup was never commented out and should remain intact
+--V1.11 20180725 KWS - Treat Missing TimeSheets as 0 Hours, Missing FactActivitySummary as 0, use 2 values for TelematicHoursOutsideTolerance 
+
+--SHOULD Carry JobNumberBK_RolledUP so JobSK_RolledUp can be repaired if necessary
+
+DECLARE @RowsInserted BIGINT;
+DECLARE @RowsUpdated BIGINT;
+DECLARE @ETLErrorBatchNumberBI BIGINT;
+DECLARE @BatchCount BIGINT;
+DECLARE @ETLRunDate DATETIME = GETUTCDATE();
+
+--SELECT @ETLActivityName = 'TransformLoadFactTimesheet', @ETLPipeLineID = '1', @ETLPipelineName = 'FactTimesheetPipeline', @ETLWindowStart = '2018-07-18 13:00:00.000', @ETLWIndowEnd = '2018-07-19 13:00:00.000'
+
+BEGIN TRY
+
+	-------------------------
+	-- LOAD FACT TIMESHEET --
+	-------------------------
+	PRINT 'DW.pFactTimesheet: Delete existing DW records for pipeline instance'
+	DELETE FROM DW.FactTimesheet
+	WHERE ETLWindowStart = @ETLWindowStart 
+		AND ETLWindowEnd = @ETLWindowEnd
+	OPTION (LABEL = 'DW.pFactTimesheet: Delete existing DW records for pipeline instance') 
+
+
+	PRINT 'DW.pFactTimesheet: Insert into Table #Timesheets'
+	IF OBJECT_ID('Tempdb..#Timesheets') IS NOT NULL DROP TABLE #Timesheets
+
+	SELECT 
+		8 AS SourceSystemSK
+	  , ISNULL(WAY.YardSK,-1) AS YardSK
+	  , ISNULL(DA.AssetSK,-1) AS AssetSK
+	  , ISNULL(DJ.JobSK,-1) AS JobSK_Actual
+	  , ISNULL(DC.CustomerSK,-1) AS CustomerSK
+	  , ISNULL(DE.EmployeeSK,-1) AS EmployeeSK
+	  , ISNULL(DWO.WorkOrderSK,-1) AS WorkOrderSK 
+	  , ISNULL(DD.DateSK,'19000101') AS WorkDateSK
+	  , NULL AS YardIDBK --Source data does not have YardID; we obtain the YardSK via AssetSK in Work.AssetYard, as such there is no BK
+	  , Final.EquipmentNumber AS AssetNumberBK
+	  , CASE WHEN LEFT(Final.JobNumber,3) = '18-' THEN SUBSTRING(Final.JobNumber,4,9) ELSE Final.JobNumber END AS JobNumberBK_Actual
+	  , Final.CustomerNumber AS CustomerNumberBK
+	  , Final.EmployeeNumber AS EmployeeNumberBK
+	  , Final.WorkOrderNumber AS WorkOrderNumberBK
+	  , CAST(Final.WorkDate AS DATE) AS WorkDateBK
+	  , Final.Days AS WorkDayBK
+	  , Final.WeekEndingDate AS WeekEndingDateBK
+	  , Final.HdrID AS HdrID
+	  , SUM(CAST(Final.Hours AS DECIMAL(5,2))) AS HoursWorked
+	  , Final.CreateDate AS CreateDate
+	  , @ETLPipelineID AS ETLPipelineID
+	  , @ETLActivityName AS ETLActivityName
+	  , @ETLRunDate AS ETLInsertDate
+	  , @ETLRunDate AS ETLModifyDate
+	  , @ETLWindowStart AS ETLWindowStart
+	  , @ETLWindowEnd AS ETLWindowEnd
+	  , NULL AS ETLErrorRowID
+	INTO #Timesheets
+	--SELECT * 
+	FROM 
+	(
+		SELECT *
+		  , CASE 
+				WHEN Days = 'MondayHours'		THEN DATEADD(dd,-6,WeekEndingDate)
+				WHEN Days = 'TuesdayHours'		THEN DATEADD(dd,-5,WeekEndingDate)
+				WHEN Days = 'WednesdayHours'	THEN DATEADD(dd,-4,WeekEndingDate)
+				WHEN Days = 'ThursdayHours'		THEN DATEADD(dd,-3,WeekEndingDate)
+				WHEN Days = 'FridayHours'		THEN DATEADD(dd,-2,WeekEndingDate)
+				WHEN Days = 'SaturdayHours'	THEN DATEADD(dd,-1,WeekEndingDate)
+				ELSE WeekEndingDate 
+			END AS WorkDate
+		FROM
+		(--HERE deduplicate by getting Min StageSK amoung duplicates and selectin the row with the Min StageSK as the winner
+ 			SELECT *
+			FROM Stage.Timesheet
+			WHERE LEFT(EquipmentNumber,2) IN ('08','20')
+			AND ETLWindowStart = @ETLWindowStart
+			AND ETLWindowEnd = @ETLWindowEnd
+			AND	COALESCE(ETLErrorRowID,-1) BETWEEN COALESCE(@FromRowNumber,-1) AND COALESCE(@ToRowNumber,-1)
+	--		AND CustomerNUmber = '06125'  AND EmployeeNumber='53053' AND EquipmentNumber='08N909'--
+		) AS Stage
+		UNPIVOT 
+		(
+			Hours FOR Days IN (MondayHours, TuesdayHours, WednesdayHours, ThursdayHours, FridayHours, SaturdayHours, SundayHours)
+		) AS Unpt 
+	) AS Final
+	--Job
+	LEFT JOIN DW.Job AS DJ 
+	ON DJ.JobNumber = CASE WHEN LEFT(Final.JobNumber,3) = '18-' THEN SUBSTRING(Final.JobNumber,4,9) ELSE Final.JobNumber END
+	--Asset
+	LEFT JOIN DW.Asset AS DA 
+	ON DA.AssetNumber = Final.EquipmentNumber
+	--Yard
+	LEFT JOIN Work.AssetYard AS WAY
+	ON DA.AssetNumber = WAY.AssetNumberBK
+	AND WAY.EffectiveDate = (SELECT MAX(EffectiveDate) FROM Work.AssetYard w WHERE DA.AssetNumber=w.AssetNumberBK AND w.EffectiveDate<=Final.WorkDate)
+	--Employee
+	LEFT JOIN DW.Employee AS DE
+	ON DE.EmployeeID = Final.EmployeeNumber
+	--Customer
+	LEFT JOIN DW.Customer AS DC
+	ON DC.CustomerNumber = Final.CustomerNumber
+	--WorkOrder
+	LEFT JOIN DW.WorkOrder AS DWO
+	ON DWO.WorkOrderNumber = Final.WorkOrderNumber
+	--Date
+	LEFT JOIN DW.[Date] AS DD
+	ON DD.DateSK = CONVERT(VARCHAR(8),CAST(Final.WorkDate AS DATE),112)
+
+	--WHERE CAST(Final.Hours AS DECIMAL(5,2)) !=0   --include - hours so we can see 
+
+	GROUP BY
+        ISNULL(WAY.YardSK,-1)
+      , ISNULL(DA.AssetSK,-1)
+	  , ISNULL(DJ.JobSK,-1)
+	  , ISNULL(DC.CustomerSK,-1)
+	  , ISNULL(DE.EmployeeSK,-1)
+	  , ISNULL(DWO.WorkOrderSK,-1)	 
+	  , ISNULL(DD.DateSK,'19000101')
+	  , Final.EquipmentNumber
+	  , CASE WHEN LEFT(Final.JobNumber,3) = '18-' THEN SUBSTRING(Final.JobNumber,4,9) ELSE Final.JobNumber END
+	  , Final.CustomerNumber
+	  , Final.EmployeeNumber
+	  , Final.WorkOrderNumber
+	  , CAST(Final.WorkDate AS DATE)
+	  , Final.Days
+	  , Final.WeekEndingDate
+	  , Final.HdrID
+	  , Final.CreateDate
+OPTION (LABEL ='DW.pFactTimesheet: Insert into Table #Timesheets');
+
+--select * from #tIMESHEETS where [AssetNumberBK] = '08N909' order by wORKdATEbk, joBsk_aCTUAL
+--select * from ET.TImeSheet where [AssetNumberBK] = '08N909' order by wORKdATEbk, joBsk_aCTUAL 
+
+	PRINT 'DW.pFactTimesheet: Insert Table DW.FactTimesheet'
+	INSERT INTO DW.FactTimesheet
+	(
+		SourceSystemSK
+	  , YardSK
+	  , AssetSK
+	  , JobSK_Actual
+	  , JobSK_RolledUp
+	  , CustomerSK
+	  , EmployeeSK
+	  , WorkOrderSK
+	  , WorkDateSK
+	  , YardIDBK
+	  , AssetNumberBK
+	  , JobNumberBK_Actual
+	  , CustomerNumberBK
+	  , EmployeeNumberBK
+	  , WorkOrderNumberBK
+	  , WorkDateBK
+	  , WorkDayBK
+	  , WeekEndingDateBK
+	  , HdrID
+	  , HoursWorked
+      , CreateDate
+	  , ETLPipelineID
+	  , ETLActivityName
+	  , ETLInsertDate
+      , ETLModifyDate
+	  , ETLWindowStart
+	  , ETLWindowEnd
+	  , ETLErrorRowID
+	)
+	  SELECT
+		TS.SourceSystemSK
+	  , TS.YardSK
+	  , TS.AssetSK
+	  , TS.JobSK_Actual
+	  , JRL.JobSK_RolledUp
+	  , TS.CustomerSK
+	  , TS.EmployeeSK
+	  , TS.WorkOrderSK
+	  , TS.WorkDateSK
+	  , TS.YardIDBK
+	  , TS.AssetNumberBK
+	  , TS.JobNumberBK_Actual
+	  , TS.CustomerNumberBK
+	  , TS.EmployeeNumberBK
+	  , TS.WorkOrderNumberBK
+	  , TS.WorkDateBK
+	  , TS.WorkDayBK
+	  , TS.WeekEndingDateBK
+	  , TS.HdrID
+	  , TS.HoursWorked
+      , TS.CreateDate
+	  , TS.ETLPipelineID
+	  , TS.ETLActivityName
+	  , TS.ETLInsertDate
+      , TS.ETLModifyDate
+	  , TS.ETLWindowStart
+	  , TS.ETLWindowEnd
+	  , TS.ETLErrorRowID
+	  FROM #Timesheets AS TS
+	  JOIN
+	  (
+		--Select the Asset, WorkDate, and Job where Rank = 1 to ensure we pick the Job with the most hours worked
+		--In case there are multiple Jobs with the same number of hours worked for Rank = 1, arbirarily pick a Job using the Max function
+		SELECT AssetSK, WorkDateSK, MAX(JobSK_Actual) AS JobSK_RolledUp 
+		FROM 
+		(	--Rank the hours worked by Asset and WorkDate, we will be selecting the Job with the most hours worked
+			SELECT AssetSK, WorkDateSK, JobSK_Actual, HoursWorked, RANK() OVER(PARTITION BY AssetSK, WorkDateSK ORDER BY HoursWorked DESC) AS HoursWorkedRanked
+			FROM 
+			(	--Sum the hours by Asset, WorkDate, and Job
+				SELECT AssetSK, WorkDateSK, JobSK_Actual, SUM(HoursWorked) AS HoursWorked
+				FROM #Timesheets
+				GROUP BY AssetSK, WorkDateSK, JobSK_Actual
+			) AS Main
+		) AS Ranked 
+		WHERE HoursWorkedRanked = 1
+		GROUP BY AssetSK, WorkDateSK
+	) AS JRL --JobSKRolledUp
+	ON TS.AssetSK = JRL.AssetSK
+	AND TS.WorkDateSK = JRL.WorkDateSK
+	OPTION (LABEL = 'DW.pFactTimesheet: Insert Table DW.FactTimesheet') 
+
+	----------------------------------
+	-- UPDATE FACT ACTIVITY SUMMARY --
+	----------------------------------
+	--Need to tag FactCtivitySummary with JobSK , but there is a 1-m between FactActivitySummary and Timesheet,
+	--So must take top 1 from list so there will be a 1-1
+	
+	PRINT 'DW.pFactTimesheet: Insert into Table #tsJob'
+	IF OBJECT_ID('Tempdb..#tsJob') IS NOT NULL DROP TABLE #tsJob
+	--For Each Asset/WorkDate Get the JobSK from the MOST REcently Updated TimeSheet row with the most hours ( to break ties)
+	-- of the duplicates, we assume the most recently updated row has the best data for the day and asset
+	SELECT *
+	INTO #tsJob
+	FROM (
+		SELECT 
+			  ROW_NUMBER() OVER (PARTITION BY AssetNumberBK, WorkDateSK  ORDER BY ETLModifyDate DESC, HoursWorked DESC) AS RowNumber 
+			,  AssetNumberBK
+			,  WorkDateSK
+			, CASE WHEN JobSK_RolledUp IS NOT NULL THEN JobSK_RolledUP
+				   WHEN JobSK_Actual IS NOT NULL THEN JobSK_Actual
+				   ELSE -1 END AS JobSK
+			, ETLModifyDate
+		FROM DW.FactTImeSheet
+		--WHERE Cast(WorkDateSK AS DATE)=@ProcessDate
+		WHERE ETLWindowStart = @ETLWindowStart
+		  AND ETLWindowEnd = @ETLWindowEnd
+		--ORDER By AssetNumberBk, WorkDate, RowNumber
+		) AS A
+		WHERE RowNumber = 1
+	OPTION (LABEL = 'DW.pFactTimesheet: Insert into Table #tsJob') ;
+	PRINT 'DW.pFactTimesheet: Update JobSk in FactActivitySummary'
+	--UpDate Table Where the JobSK needs to be changed
+	UPDATE DW.FactActivitySummary
+	  SET JobSK=ts.JobSK
+			,ETLModifyDate =@ETLRunDate
+	FROM #tsJob ts 
+	WHERE ts.WorkDateSK = DW.FactActivitySummary.WorkDateSK
+		AND ts.AssetNumberBK = DW.FactActivitySummary.AssetNumberBK
+		AND ts.JobSk != DW.FactActivitySummary.JobSK
+	OPTION (LABEL = 'DW.pFactTimesheet: Update JobSk in FactActivitySummary') ;
+
+	IF OBJECT_ID('Tempdb..#tsJob') IS NOT NULL DROP TABLE #tsJob
+	
+	--Now Update ActivityFlags
+	--We recalculate ALL activity flags and set the CurrentActivitySK 
+	--Only work on the WorkDates included in this TimeSheet
+	DECLARE @MinWorkDate DATE, @MaxWorkDate DATE;
+	SELECT @MinWorkDate = MIN(CAST(WorkDateSK AS DATE)), @MaxWorkDate =Max(CAST(WorkDateSK AS DATE))
+	FROM DW.FactTimeSheet
+	WHERE ETLWindowStart=  @ETLWindowStart
+		AND ETLWindowEnd = @ETLWIndowEnd;
+	
+	IF OBJECT_ID('Tempdb..#TimesheetFlagsForUpdate') IS NOT NULL DROP TABLE #TimesheetFlagsForUpdate
+
+	SELECT  ISNULL(FasYardSK,tsYardSK) AS YardSK, ISNULL(fasAssetNumberBK,tsAssetNumberBK) AS AssetNumberBK,
+			ISNULL(fasWorkDateSk,tsWorkDateSK) AS WorkDateSK, af.ActivityFlagSK AS NewActivityFlagSK
+			 ,Main.* 
+			 INTO #TimesheetFlagsForUpdate 
+			 FROM 
+	(
+			SELECT fas.YardSK AS fasYardSK,		fas.AssetNumberBK AS fasAssetNumberBK,		fas.WorkDateSK AS fasWorkDateSK , TelematicHours, YardTimeHours
+					, ts.YardSK AS tsYardSK,	ts.AssetNumberBK AS tsAssetNumberBK,		ts.WorkDateSK AS tsWorkDateSK,  HoursWorked,	ts.JobSK_RolledUP
+					--,CLA.EmployeeSK --,CLA..WorkDateSK,	CLA..AssetNumberBK,	CLA.CrewAssetsNotInSameYardFlag		
+					--,y.YardTimeDiscardHoursDiscardValueHigh
+			  ,	ISNULL(ISS.IsStorm,-1) AS IsStorm
+			  , ISNULL(CLA.CrewAssetsNotInSameYard,-1) AS CrewAssetsNotInSameYard
+			  -- If missing Timesheet set to 1, Treat As if HoursWorked=0
+			  , CASE WHEN TS.HoursWorked IS NULL THEN 1
+					 WHEN TS.HoursWorked = 0 THEN 1 
+					 ELSE 0 END AS [TimesheetHours=0]
+			  -- If missing Timesheet set to 1, Treat As if HoursWorked=0
+			  , CASE WHEN TS.HoursWorked IS NULL THEN 1 
+					 WHEN TS.HoursWorked < y.TimesheetHoursDiscardValue THEN 1 
+					 ELSE 0 END AS TimeSheetHoursLessThanThreshold
+			  --If no tics, we do not know if missing API call , or got good results , set to 1 -Treat AS IF Hours=0
+			  , CASE WHEN fas.TelematicHours IS NULL THEN 1
+					 WHEN fas.TelematicHours =0 THEN 1 
+					 ELSE 0 END  AS [TelematicHours=0]
+			  --If no tics, we do not know if missing API call , or got good results , set to 1 -Treat AS IF Hours=0
+			  , CASE WHEN fas.TelematicHours IS NULL THEN 1
+					 WHEN fas.TelematicHours < y.TotalTelematicTimeHoursDiscardValue THEN 1 
+			    	ELSE 0 END AS TelematicHoursLessThanThreshold
+			  , CASE WHEN ISNULL(fas.YardTimeHours,0) > y.YardTimeDiscardHoursDiscardValueHigh THEN 1 ELSE 0 END AS ExcessiveYardTime
+			  , CASE WHEN TS.HoursWorked = 0 OR TS.HoursWorked IS NULL THEN 1
+					 WHEN fas.TelematicHours = 0 OR fas.TelematicHours IS NULL THEN 1
+					 WHEN ISNULL(fas.TelematicHours,0) / TS.HoursWorked > y.TelematicTotalHours_TimesheetRatioHighLimit THEN 2
+					 WHEN ISNULL(fas.TelematicHours,0) / TS.HoursWorked < y.TelematicTotalHours_TimesheetRatiolOWLimit	THEN 1 
+					 ELSE 0 END AS TelematicHoursOutsideTolerance
+			FROM   
+			(
+				SELECT YardSK,	AssetNumberBK,	WorkDateSK,
+					SUM(CASE WHEN ActivitySK=1 THEN Hours ELSE 0 END) AS YardTimeHours,
+					SUM(Hours) AS TelematicHours
+				FROM DW.FactActivitySummary
+					WHERE CAST(WorkDateSK AS DATE) BETWEEN @MinWorkDate AND @MaxWorkDate
+						AND ActivitySK NOT IN (-1,7)
+						--AND AssetNumberBK = '08S263'---debug
+				GROUP BY YardSK,
+					AssetNumberBK,
+					WorkDateSK ) AS fas
+			FULL OUTER JOIN 
+				(SELECT YardSK, AssetNumberBK, WorkDateSK, JobSK_RolledUp, SUM(HoursWorked) AS HoursWorked
+					FROM DW.FactTimesheet
+					WHERE ETLWindowStart = @ETLWindowStart
+						AND ETLWindowEnd = @ETLWindowEnd
+					--AND AssetNumberBK = '08S263'---debug
+					GROUP BY YardSK, AssetNumberBK, WorkDateSK, JobSK_RolledUp ) AS ts
+			ON fas.AssetNumberBK=ts.AssetNumberBK
+				AND fas.WorkDateSK=ts.WorkDateSK
+		LEFT JOIN
+				(--NOtice we get Storm flag from RolledUp JobSK, not Actual JobSK
+				SELECT JobSK, CASE IsStorm WHEN 'Yes' THEN 1 WHEN 'No' THEN 0 ELSE -1 END AS IsStorm 
+				FROM DW.Job
+				) AS ISS --IsStorm
+			ON TS.JobSK_RolledUp = ISS.JobSK 
+		LEFT JOIN
+				(--This is very subtle! Count the number of yards for each crew leader for each date. If the count is > 1 then the crew leader had
+				--assets in multiple yards. Then, for each crew leader with assets in multiple yards, get the associated assets for that crew leader
+				--for that day and set the flag.
+				--We Drop EmployeeSK and do A Distinct to eliminate duplicate rows due to mulitple crewleaders sharing assets in a single day
+				--Now we have a list of Each asset/day and Its CrewAssetsNotInSameYard value
+				SELECT DISTINCT --Assets.EmployeeSK, 
+					Assets.WorkDateSK, Assets.AssetNumberBK
+					, CASE WHEN NumberOfYards >1 THEN 1 ELSE 0 END AS CrewAssetsNotInSameYard
+				FROM (
+					--Get Count of Different Yards for Crew leaders Assets for each Day
+					SELECT EmployeeSK, WorkDateSK, COUNT(DISTINCT YardSK) AS NumberOfYards
+						FROM DW.FactTimesheet
+						WHERE ETLWindowStart = @ETLWindowStart
+						AND ETLWindowEnd = @ETLWindowEnd
+					--AND YardSK !=-1  --Will says treat -1 as a different yard
+					GROUP BY EmployeeSK, WorkDateSK) AS MultYards
+				INNER JOIN  -- Get all the Assets for the Employee
+					(SELECT DISTINCT AssetNumberBK, EmployeeSK, WorkDateSK 
+					FROM DW.FactTimesheet
+					WHERE ETLWindowStart = @ETLWindowStart
+						AND ETLWindowEnd = @ETLWindowEnd) AS Assets
+				ON MultYards.EmployeeSK = Assets.EmployeeSK
+				AND MultYards.WorkDateSK = Assets.WorkDateSK ) AS CLA --CrewLeaderAssetsNotInSameYard
+			ON TS.AssetNumberBK = CLA.AssetNumberBK
+				AND TS.WorkDateSK = CLA.WorkDateSK
+			LEFT JOIN DW.Yard y ON y.YardSK=ISNULL(ts.YardSK,fas.YardSK)
+		--	Order by ts.AssetNumberBK, ts.WorkDateSK
+	) AS Main
+	LEFT JOIN DW.ActivityFlag AS AF
+		ON Main.[TelematicHours=0] = AF.[TelematicHours=0] 
+		AND Main.[TelematicHoursLessThanThreshold] = AF.[TelematicHours<3]
+		AND Main.ExcessiveYardTime = AF.ExcessiveYardTime
+		AND Main.IsStorm = AF.Storm
+		AND Main.CrewAssetsNotInSameYard = AF.CrewAssetsNotInSameYard
+		AND Main.[TimesheetHours=0] = AF.[TimesheetHours=0]
+		AND Main.TimeSheetHoursLessThanThreshold = AF.[TimesheetHours<3]
+		AND Main.TelematicHoursOutsideTolerance = AF.TelematicTimeOutOfTolerance
+	--	Order by  EmployeeSk,ISNULL(fasWorkDateSk,tsWorkDateSK),  ISNULL(fasAssetNumberBK,tsAssetNumberBK)
+	OPTION(Label='DW.pFactTimesheet: Insert into Table #TimesheetFlagsForUpdate');
+
+	PRINT 'DW.pFactTimesheet: Update CurrentActivityFlagSK in Table DW.FactActivitySummary'
+	UPDATE DW.FactActivitySummary
+	SET FactActivitySummary.CurrentActivityFlagSK = NewFlag.NewActivityFlagSK
+		,FactActivitySummary.ETLModifyDate = @ETLRunDate
+	FROM #TimesheetFlagsForUpdate AS NewFlag
+	WHERE FactActivitySummary.AssetNumberBK = NewFlag.AssetNumberBK  --dropped the YardSk from the join
+		AND FactActivitySummary.WorkDateSK = NewFlag.WorkDateSK
+	--AND FactActivitySummary.ETLModifyDate = @ETLRunDate  The time FactActivitySummary runs is not related to the time TimeSheet runs
+	OPTION (LABEL = 'DW.pFactTimesheet: Update CurrentActivityFlagSK in Table DW.FactActivitySummary')
+
+	----------------------------------
+	-- UPDATE LATE ARRIVING MEMBERS --
+	---------------------------------- 
+	
+	PRINT 'DW.pFactTimesheet: Insert into Table #TempFDE'
+	IF OBJECT_ID('Tempdb..#TempFDE') IS NOT NULL DROP TABLE #TempFDE
+
+	SELECT FDE.FactDelayEventSK, ISNULL(TS.YardSK,-1) AS YardSK
+	INTO #TempFDE
+	FROM DW.FactDelayEvent AS FDE
+	--Yard
+	JOIN 
+	(
+		SELECT TSY.EmployeeNumberBK, TSY.WorkDateBK, TSY.YardSK
+		FROM
+		(
+			SELECT DISTINCT EmployeeNumberBK, WorkDateBK, YardSK 
+			FROM DW.FactTimesheet 
+			WHERE HoursWorked <> 0
+		) AS TSY --TimesheetYard
+		JOIN
+		(
+			SELECT EmployeeNumberBK, WorkDateBK, COUNT(1) AS NbrOfYards
+			FROM (SELECT DISTINCT EmployeeNumberBK, WorkDateBK, YardSK FROM DW.FactTimesheet WHERE HoursWorked <> 0) AS Main
+			GROUP BY EmployeeNumberBK, WorkDateBK
+			HAVING COUNT(1) = 1
+		) AS TSYC --TimesheetYardCount
+		ON TSYC.EmployeeNumberBK = TSY.EmployeeNumberBK
+		AND TSYC.WorkDateBK = TSY.WorkDateBK
+	) AS TS
+	ON FDE.CrewLeaderNumberBK = TS.EmployeeNumberBK
+	AND CAST(FDE.DelayDateBK AS DATE) = CAST(TS.WorkDateBK AS DATE)
+	WHERE FDE.YardSK = -1
+	AND ISNULL(TS.YardSK,-1) <> -1
+
+	UPDATE DW.FactDelayEvent	
+	SET FactDelayEvent.YardSK = TempFDE.YardSK
+		,ETLModifyDate = @ETLRunDate
+	FROM #TempFDE AS TempFDE
+	WHERE FactDelayEvent.FactDelayEventSK = TempFDE.FactDelayEventSK
+	OPTION (LABEL = 'DW.pFactTimesheet: DW.FactDelayEvent.YardSK') 
+	
+	PRINT 'DW.pFactTimesheet: Insert into Table #TempFDT'
+	IF OBJECT_ID('Tempdb..#TempFDT') IS NOT NULL DROP TABLE #TempFDT
+
+	SELECT FDT.FactDailyTaskSK, ISNULL(TS.YardSK,-1) AS YardSK
+	INTO #TempFDT
+	FROM DW.FactDailyTask AS FDT
+	--Yard
+	JOIN 
+	(
+		SELECT TSY.EmployeeNumberBK, TSY.WorkDateBK, TSY.YardSK
+		FROM
+		(
+			SELECT DISTINCT EmployeeNumberBK, WorkDateBK, YardSK 
+			FROM DW.FactTimesheet 
+			WHERE HoursWorked <> 0
+		) AS TSY --TimesheetYard
+		JOIN
+		(
+			SELECT EmployeeNumberBK, WorkDateBK, COUNT(1) AS NbrOfYards
+			FROM (SELECT DISTINCT EmployeeNumberBK, WorkDateBK, YardSK FROM DW.FactTimesheet WHERE HoursWorked <> 0) AS Main
+			GROUP BY EmployeeNumberBK, WorkDateBK
+			HAVING COUNT(1) = 1
+		) AS TSYC --TimesheetYardCount
+		ON TSYC.EmployeeNumberBK = TSY.EmployeeNumberBK
+		AND TSYC.WorkDateBK = TSY.WorkDateBK
+	) AS TS
+	ON FDT.CrewLeaderNumberBK = TS.EmployeeNumberBK
+	AND CAST(FDT.TaskDateBK AS DATE) = CAST(TS.WorkDateBK AS DATE)
+	WHERE FDT.YardSK = -1
+	AND ISNULL(TS.YardSK,-1) <> -1
+
+	UPDATE DW.FactDailyTask	
+	SET FactDailyTask.YardSK = TempFDT.YardSK
+	   ,ETLModifyDate = @ETLRunDate
+	FROM #TempFDT AS TempFDT
+	WHERE FactDailyTask.FactDailyTaskSK = TempFDT.FactDailyTaskSK
+	OPTION (LABEL = 'DW.pFactTimesheet: DW.FactDailyTask.YardSK') 
+
+END TRY
+
+BEGIN CATCH
+
+	PRINT 'Error Handling'
+
+	DECLARE @ErrorMessage NVARCHAR(4000) = ERROR_MESSAGE();  
+	DECLARE @ErrorNumber INT = ERROR_NUMBER(); 
+	DECLARE @ErrorSeverity INT = ISNULL(ERROR_SEVERITY(),16);  
+	DECLARE @ErrorState INT = ERROR_STATE();   
+	DECLARE @ErrorDateTime DATETIME = GETUTCDATE();  
+
+	SELECT @BatchCount = COUNT(*) 
+	FROM Stage.Timesheet
+	WHERE ETLPipelineID = @ETLPipelineID
+	AND COALESCE(ETLErrorRowID,-1) BETWEEN COALESCE(@FromRowNumber,-1) AND COALESCE(@ToRowNumber,-1)
+
+	INSERT INTO ETL.ErrorDetail
+	(
+		ErrorDetailID
+	  , ETLPipelineID
+	  , ETLActivityName
+	  , FromRowNumber
+	  , ToRowNumber
+	  , ErrorNumber
+	  , ErrorSeverity
+	  , ErrorState
+	  , ErrorMessage
+	  , ErrorDatetime
+	  , IsReviewed
+	  , IsErrorRecord
+	)
+	SELECT  
+		ErrorDetailID	= NEWID()
+	  , PipeLineID		= @ETLPipelineId
+	  , ETLActivityName	= @ETLActivityName
+	  , FromRowNumber	= COALESCE(@FromRowNumber,1)
+	  , ToRowNumber		= COALESCE(@ToRowNumber,@BatchCount) 
+	  , ErrorNumber		= @ErrorNumber
+	  , ErrorSeverity	= @ErrorSeverity 
+	  , ErrorState		= @ErrorState
+	  , ErrorMessage	= @ErrorMessage
+	  , ErrorDatetime	= @ErrorDateTime
+	  , IsReviewed		= CASE WHEN @BatchCount = 1 THEN 1 ELSE 0 END
+	  , IsErrorRecord	= CASE WHEN @BatchCount = 1 THEN 1 ELSE 0 END
+	OPTION (LABEL = 'DW.pFactTimesheet: Insert records to ETL.ErrorDetail')
+
+	RAISERROR (@ErrorMessage,@ErrorSeverity,@ErrorState);
+
+	IF (SELECT COUNT(*) FROM ETL.ActivityInstance WHERE ETLPipelineID = @ETLPipelineID AND ETLActivityName = @ETLActivityName AND ETLErrorStatus = 'In Progress') = 0
+	BEGIN
+		PRINT 'Launch Error'
+		EXEC ETL.pActivityUpdate @ETLPipelineID, @ETLActivityName, NULL, NULL, 0, NULL
+		--Due to the complexity of FactTimesheet do not invoke the recursive insert
+		--EXEC ETL.pErrorBatchLoad @ETLWindowStart, @ETLWindowEnd, @SourceTable, @ProcedureName, @ETLPipelineID, @ETLActivityName 
+	END
+
+END CATCH
+GO
+
+

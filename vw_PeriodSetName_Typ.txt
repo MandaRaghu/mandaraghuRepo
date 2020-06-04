@@ -1,0 +1,16 @@
+/****** Object:  View [dbo].[vw_PeriodSetName_Type]    Script Date: 05-22-2020 17:47:48 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE VIEW [dbo].[vw_PeriodSetName_Type]
+AS select distinct (t1.FISCALPERIODSETNAME+'-'+t1.FISCALPERIODTYPE) as CC_PeriodSetName_Type
+from
+(select distinct [FISCALYEARNUMBER],[FISCALPERIODNAME], 
+reportdate, FISCALPERIODSETNAME, FISCALPERIODTYPE,[FISCALPERIODADJUSTMENTPERIODFLAG]                                                                                      
+from [dbo].[EXT_fscmtopmodelam_finglcalaccam_fiscaldaypvo])t1;
+GO
+
+

@@ -1,0 +1,103 @@
+/****** Object:  View [dbo].[vw_Cost]    Script Date: 05-22-2020 17:44:17 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE VIEW [dbo].[vw_Cost] AS select * from (   
+
+
+
+select 	
+	exptype.expendituretypeexpendituretypename as EXPENDITURE_TYPE_NAME,
+	sum(convert(numeric(25,2),pcd.[PROJECTCOSTDISTRIBUTIONPEOPROJFUNCBURDENEDCOST])) as total_cost ,
+	ClassCode.[CLASSCODE] as CLASS_CODE,
+	classcat.[CLASSCATEGORY] as CLASS_CATEGORY  ,
+	TASK.[PROJECTBASEPEOPROJECTID] as project_id,
+	TASK.[PROJELEMENTID] as Task_Id,
+	TASK.[TASKSTRUCTUREBASEPEOELEMENTNUMBER] as Task_Number ,
+	TASK.[TASKSTRUCTURETRANSLATIONPEONAME] as WorkOrder,
+	TASK.[TASKSTRUCTUREBASEPEOCHARGEABLEFLAG] as chargeable_flag,
+	TASK.[TASKSTRUCTUREBASEPEOBILLABLEFLAG] as billable_flag,
+	TASK.[TASKSTRUCTUREBASEPEOPLANNINGENDDATE] as planned_finish_date,
+	projdff.[PROJECT_NUMBER_] Project_Number,
+	PRoj.[PROJECTCODESPEOTEXTATTR10] as Contract_Type ,
+	ExpCategory.[EXPENDITURECATEGORYID] as expenditure_category_id,
+	ExpCategory.[EXPENDITURECATEGORYNAME] as expenditure_category_name   ,
+	ExpType.[EXPENDITURETYPEID] as expenditure_type_id,
+	WEK.[CALWEEKENDDATE] Week_End_Date,
+	fisday.[FISCALYEARNUMBER] + '-'  +  left(fisday.[FISCALPERIODNAME],3) as Accounting_Period_Name,
+	fisday.reportdate as Accounting_Date,
+	case when ([EXPENDITURETYPEEXPENDITURETYPENAME] IN('Billable Contract Labor - Doubletime','Billable Contract Labor - Overtime','Billable Contract Labor - Regular','Productive Labor - Doubletime','Productive Labor - Overtime','Productive Labor - Regular'))
+	Then sum(case when (pcd.[PROJECTCOSTDISTRIBUTIONPEOQUANTITY] like '%E%') then 0 else
+		convert(numeric(25,2),pcd.[PROJECTCOSTDISTRIBUTIONPEOQUANTITY]) end)
+	else 0 end as PRoduction_Hours,
+	[DESC_CUSTOMER_] Customer,
+	'Cost' QueryType
+
+
+	from 
+	(select  distinct [EXPENDITUREITEMID],[EXPENDITUREITEMPEOPARENTLINENUMBER], [PROJECTCOSTDISTRIBUTIONPEOPROJECTID], [PROJECTCOSTDISTRIBUTIONPEOTASKID], [PROJECTCOSTDISTRIBUTIONPEOPRVDRGLDATE],[PROJECTCOSTDISTRIBUTIONPEOORGID], [PROJECTCOSTDISTRIBUTIONPEOQUANTITY],[PROJECTCOSTDISTRIBUTIONPEOPROJFUNCBURDENEDCOST]  from   [dbo].[temp_EXT_Fscmtopmodelam_pjctransactionsam_projectcostdistributionpvo]) pcd,                                                                                        
+	(select distinct  [PROJECTBASEPEOSEGMENT1],[PROJECTCODESPEOTEXTATTR10], [PROJECTCODESPEOTEXTATTR12], [PROJECTID],[PROJECTCODESPEOTEXTATTR03], [PROJECTCODESPEOTEXTATTR11] from [dbo].[temp_EXT_fscmtopmodelam_pjfprojectam_project]) proj,
+	(select distinct  [S_K_5000],[PROJECT_NUMBER_],[DESC_CUSTOMER_] from [dbo].[temp_EXT_fscmtopmodelam_pjf_projects_allbiam_flex_bi_pjf_projects_all_vi]) projdff  ,
+	(select distinct [FISCALYEARNUMBER],[FISCALPERIODNAME], reportdate, FISCALPERIODSETNAME, FISCALPERIODTYPE,[FISCALPERIODADJUSTMENTPERIODFLAG] from [dbo].[temp_EXT_fscmtopmodelam_finglcalaccam_fiscaldaypvo]) fisday,                                                                                    
+	(Select distinct [LEDGERPERIODSETNAME],[LEDGERACCOUNTEDPERIODTYPE],[LEDGERID] from  [dbo].[temp_EXT_fscmtopmodelam_finglledgerdefnam_ledgerpvo] ) ledger,                                                                                       
+	(Select distinct [EXPENDITUREITEMID],[EXPENDITUREITEMPEOEXPENDITURETYPEID] from [dbo].[temp_EXT_fscmtopmodelam_pjctransactionsam_expenditureitempvo]) expitem,                                                                                     
+	(Select distinct  [EXPENDITURETYPEEXPENDITURECATEGORYID],[EXPENDITURETYPEID],[EXPENDITURETYPEEXPENDITURETYPENAME] from [dbo].[temp_EXT_fscmtopmodelam_pjfsetuptransactionsam_expendituretypeview] ) exptype,                                                                                     
+	(select distinct [PJFPROJECTCLASSESPROJECTID], [PJFPROJECTCLASSESCLASSCATEGORYID],[PJFPROJECTCLASSESCLASSCODEID] from [dbo].[temp_EXT_fscmtopmodelam_pjfsetupprojectsam_projectclass] )projclass,                                                                                        
+	(Select distinct [CLASSCATEGORYID],[CLASSCATEGORY] from [dbo].[temp_EXT_fscmtopmodelam_pjfsetupprojectsam_classcategorytranslation] ) classcat,                                                                                   
+	(select distinct [PROJELEMENTID],[TASKSTRUCTURETRANSLATIONPEONAME], [PROJECTBASEPEOPROJECTID],[TASKSTRUCTUREBASEPEOELEMENTNUMBER],[TASKSTRUCTUREBASEPEOCHARGEABLEFLAG], [TASKSTRUCTUREBASEPEOBILLABLEFLAG],[TASKSTRUCTUREBASEPEOPLANNINGENDDATE]  from [dbo].[temp_EXT_fscmtopmodelam_pjfprojectdefinitionam_taskpvo]) task,
+	(select distinct [CALWEEK],[CALWEEKENDDATE]  from [dbo].[temp_EXT_hcmtopmodelanalyticsglobalam_gregoriancalendaram_fndcalweek]) WEK,
+	(select distinct [PARENTWEEK], [REPORTDATE] from [dbo].[temp_EXT_hcmtopmodelanalyticsglobalam_gregoriancalendaram_fndcalday]) fndcaldayeo,
+	(select distinct [ORGANIZATIONINFORMATIONPEOORGINFORMATION3],ORGANIZATIONINFORMATIONPEOORGANIZATIONID,[ORGANIZATIONINFORMATIONPEOORGINFORMATIONCONTEXT], [EFFECTIVESTARTDATE], [EFFECTIVEENDDATE]  from [dbo].[temp_EXT_hcmtopmodelanalyticsglobalam_organizationam_organizationinformationpvo]) expenditurebupeo,
+	(Select distinct [CLASSCODEID],[CLASSCODE] from  temp_EXT_fscmtopmodelam_pjfsetupprojectsam_classcodetranslation) ClassCode,
+	(Select distinct [EXPENDITURECATEGORYID],[EXPENDITURECATEGORYNAME]  from temp_EXT_fscmtopmodelam_pjfsetuptransactionsam_expenditurecategorytranslation) ExpCategory
+
+	where pcd.Projectcostdistributionpeoprojectid=proj.[PROJECTID]   
+	and projdff.[S_K_5000] =proj.[PROJECTID]                                                                                                                                                                                                                                                        
+	and pcd.projectcostdistributionpeoprvdrgldate=fisday.reportdate                                                                                        
+	and fisday.FISCALPERIODSETNAME = ledger.[LEDGERPERIODSETNAME]                                                                                   
+	AND fisday.FISCALPERIODTYPE = ledger.[LEDGERACCOUNTEDPERIODTYPE]                                                                                       
+	and fisday.[FISCALPERIODADJUSTMENTPERIODFLAG]='N'                                                                                        
+	and exptype.expendituretypeid=expitem.expenditureitempeoexpendituretypeid                                                                                     
+	and expitem.expenditureitemid=pcd.expenditureitemid                                                                                      
+	and projclass.[PJFPROJECTCLASSESPROJECTID]=proj.[PROJECTID]                                                                                     
+	and projclass.[PJFPROJECTCLASSESCLASSCATEGORYID]=classcat.[CLASSCATEGORYID]                                                                                   
+	and classcat.[CLASSCATEGORY]='Line of Business'                                                                                   
+	and task.[PROJELEMENTID]=pcd.[projectcostdistributionpeotaskid]                                                                                        
+	and task.[PROJECTBASEPEOPROJECTID]=pcd.Projectcostdistributionpeoprojectid                                                                                    
+	and task.[PROJECTBASEPEOPROJECTID]=proj.[PROJECTID]                                                                                      
+	and fndcaldayeo.[PARENTWEEK]=wek.[CALWEEK] 
+	AND pcd.projectcostdistributionpeoprvdrgldate = fndcaldayeo.[REPORTDATE]    
+	AND expenditurebupeo.[ORGANIZATIONINFORMATIONPEOORGINFORMATION3] = ledger.[LEDGERID]
+	AND pcd.[PROJECTCOSTDISTRIBUTIONPEOORGID] = expenditurebupeo.ORGANIZATIONINFORMATIONPEOORGANIZATIONID
+	AND ( 'FUN_BUSINESS_UNIT' ) = expenditurebupeo.[ORGANIZATIONINFORMATIONPEOORGINFORMATIONCONTEXT]
+	AND ('2018-03-26' BETWEEN expenditurebupeo.[EFFECTIVESTARTDATE] AND expenditurebupeo.[EFFECTIVEENDDATE])
+	AND projclass.[PJFPROJECTCLASSESCLASSCODEID] =ClassCode.[CLASSCODEID]
+	AND expCategory.[EXPENDITURECATEGORYID]=exptype.[EXPENDITURETYPEEXPENDITURECATEGORYID]
+
+	group by exptype.expendituretypeexpendituretypename,
+	ClassCode.[CLASSCODE],
+	classcat.[CLASSCATEGORY]    ,
+	TASK.[PROJECTBASEPEOPROJECTID],
+	TASK.[PROJELEMENTID],
+	TASK.[TASKSTRUCTURETRANSLATIONPEONAME] ,
+	TASK.[TASKSTRUCTUREBASEPEOELEMENTNUMBER],
+	TASK.[TASKSTRUCTUREBASEPEOCHARGEABLEFLAG],
+	TASK.[TASKSTRUCTUREBASEPEOBILLABLEFLAG],
+	TASK.[TASKSTRUCTUREBASEPEOPLANNINGENDDATE],
+	projdff.[PROJECT_NUMBER_],
+	PRoj.[PROJECTCODESPEOTEXTATTR10] ,
+	ExpCategory.[EXPENDITURECATEGORYID],
+	ExpCategory.[EXPENDITURECATEGORYNAME] ,
+	ExpType.[EXPENDITURETYPEID],
+	WEK.[CALWEEKENDDATE],
+	fisday.[FISCALYEARNUMBER],
+	left(fisday.[FISCALPERIODNAME],3),
+	fisday.reportdate
+	,[DESC_CUSTOMER_]
+	)a;
+GO
+
+

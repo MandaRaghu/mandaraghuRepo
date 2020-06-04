@@ -1,0 +1,24 @@
+/****** Object:  View [dbo].[vw_WWOR_Cost_Rev_By_Category]    Script Date: 05-22-2020 18:18:16 ******/
+SET ANSI_NULLS ON
+GO
+
+SET QUOTED_IDENTIFIER ON
+GO
+
+CREATE VIEW [dbo].[vw_WWOR_Cost_Rev_By_Category]
+AS select (Project_Number+'-'+Accounting_Period_Name) as KeyId, Project_Number, Accounting_Period_Name, expenditure_category_name, SUM( [Total Cost]) as [Total Cost] , SUM(Revenue) AS Revenue
+from (
+	select Project_Number,Accounting_Period_Name, expenditure_category_name, SUM(total_cost) [Total Cost], 0 as Revenue
+	from Vw_Cost
+	group by Project_Number,Accounting_Period_Name, expenditure_category_name
+
+	Union
+
+	select Project_Number,Accounting_Period_Name, expenditure_category_name, 0 [Total Cost], SUM(Revenue) as Revenue
+	from [vw_Revenue]
+	group by Project_Number,Accounting_Period_Name, expenditure_category_name
+)a
+group by Project_Number,Accounting_Period_Name, expenditure_category_name;
+GO
+
+
